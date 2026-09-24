@@ -49,6 +49,7 @@
   }
   .badge.draft { color: var(--ok); border-color: currentColor; }
   .badge.writing { color: var(--warn); border-color: currentColor; }
+  .badge.decay { color: var(--warn); border-color: currentColor; }
   .badge.draft_invalid, .badge.draft_failed, .badge.writer_rejected { color: var(--danger); border-color: currentColor; }
   .badge.kind { border-color: var(--accent); color: var(--accent); }
   .trigger { color: var(--fg); margin: 10px 0 4px; font-weight: 550; }
@@ -84,6 +85,10 @@
   .reject-box.open { display: flex; }
   .reject-box input { flex: 1; }
   .empty { color: var(--muted); font-size: 13.5px; }
+  .demo {
+    margin: 14px 0 0; padding: 8px 13px; border-radius: 8px; font-size: 12.5px;
+    color: var(--accent); border: 1px dashed currentColor; background: var(--code-bg);
+  }
   .entry { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
   .entry:last-child { border-bottom: none; }
   .entry .name { font-weight: 550; }
@@ -101,6 +106,7 @@
   <div class="meta" id="meta">loading…</div>
 </header>
 <main>
+  <div class="demo" id="demo" hidden>Demo mode — mock data; actions do not touch your library.</div>
   <section>
     <h2>Queue <span class="count" id="queue-count"></span></h2>
     <div id="queue"></div>
@@ -185,10 +191,10 @@ function decayCard(candidate) {
   const children = [
     el("div", { class: "row" }, [
       el("h3", { text: candidate.title || candidate.id }),
-      badge("decay proposal", "writer_rejected"),
+      badge("decay proposal", "decay"),
     ]),
     el("p", { class: "summary", text: candidate.summary || "" }),
-    el("p", { class: "src", text: `target: ${candidate.entry_type} ${candidate.target}` }),
+    el("p", { class: "src", text: `target: ${candidate.entry_type} · ${candidate.entry_title || candidate.target}` }),
   ];
   children.push(el("div", { class: "actions" }, [
     el("button", { class: "primary", text: "Archive", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "archive" }) }),
@@ -205,22 +211,22 @@ function factControls(candidate) {
   ));
   projectInput.hidden = (candidate.scope || "user") !== "project";
   scopeSelect.addEventListener("change", () => { projectInput.hidden = scopeSelect.value !== "project"; });
-  return {
-    node: el("div", { class: "actions" }, [
-      el("span", { class: "sub", text: "scope:" }),
-      scopeSelect,
-      projectInput,
-      el("button", {
-        class: "primary", text: "Accept",
-        onclick: () => act("accept", {
-          id: candidate.id,
-          scope: scopeSelect.value,
-          project: scopeSelect.value === "project" ? projectInput.value : null,
-        }),
+  const reject = rejectBox(candidate);
+  const node = el("div", { class: "actions" }, [
+    el("span", { class: "sub", text: "scope:" }),
+    scopeSelect,
+    projectInput,
+    el("button", {
+      class: "primary", text: "Accept",
+      onclick: () => act("accept", {
+        id: candidate.id,
+        scope: scopeSelect.value,
+        project: scopeSelect.value === "project" ? projectInput.value : null,
       }),
-    ]),
-    reject: rejectBox(candidate),
-  };
+    }),
+    el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") }),
+  ]);
+  return { node, reject };
 }
 
 function candidateCard(candidate) {
@@ -310,19 +316,24 @@ function entryRow(entry, archived = false) {
       el("button", { class: "danger", text: "Archive", onclick: () => act("entry_archive", { id: entry.id }) })
     );
   }
-  return el("div", { class: "entry" }, [
-    el("div", {}, [
-      el("div", { class: "name" }, [
-        el("span", { text: entry.title }),
-        entry.pinned ? el("span", { class: "pin", text: " ●" }) : null,
-      ]),
-      el("div", { class: "sub", text: sub.join(" · ") }),
+  const left = el("div", {}, [
+    el("div", { class: "name" }, [
+      el("span", { text: entry.title }),
+      entry.pinned ? el("span", { class: "pin", text: " ●" }) : null,
     ]),
-    ops,
+    el("div", { class: "sub", text: sub.join(" · ") }),
   ]);
+  if (entry.body) {
+    left.append(el("details", {}, [
+      el("summary", { text: "View" }),
+      el("blockquote", { text: entry.body }),
+    ]));
+  }
+  return el("div", { class: "entry" }, [left, ops]);
 }
 
 function render(state) {
+  $("#demo").hidden = !state.demo;
   const queue = $("#queue");
   queue.replaceChildren();
   const candidates = (state.candidates || []).slice().sort((a, b) => {

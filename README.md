@@ -77,6 +77,8 @@ poppy ui --host 0.0.0.0 --token "$(openssl rand -hex 16)"
 
 A non-loopback bind without a token is refused unless you pass `--insecure`. The token can also live in config (`poppy config set ui.token <secret>`) so it stays out of process listings. POSTs must be `application/json`, so a cross-site form cannot act on the library, but the UI can accept skills — treat the port as an admin endpoint. For remote access prefer an SSH tunnel or an authenticating proxy (Cloudflare Access, Tailscale); pass `--insecure` only when the port itself is unreachable from untrusted networks.
 
+Want to look around before wiring Poppy into anything? `poppy ui --demo` serves the same UI over mock data: every card and row state, nothing read from or written to disk.
+
 ## Uninstall
 
 ```bash

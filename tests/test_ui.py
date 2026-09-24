@@ -3,14 +3,16 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from poppy import library, ui  # noqa: E402
+from poppy import demo, library, ui  # noqa: E402
 from poppy.config import load_config  # noqa: E402
 from poppy.util import PoppyError, ensure_home_layout  # noqa: E402
 
@@ -109,6 +111,115 @@ class TestUiServer(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body)["ok"])
+
+
+class TestUiDemo(unittest.TestCase):
+    """`poppy ui --demo` serves mock data and never touches the home."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / "home"
+        ensure_home_layout(self.home)
+        self.cfg = load_config(self.home)
+        self.server = ui.build_server(self.home, self.cfg, host="127.0.0.1", port=0, demo=True)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.tmp.cleanup()
+
+    def request(self, path, method="GET", body=None):
+        url = f"http://127.0.0.1:{self.server.server_address[1]}{path}"
+        request = urllib.request.Request(
+            url,
+            data=None if body is None else json.dumps(body).encode("utf-8"),
+            headers={} if body is None else {"Content-Type": "application/json"},
+            method=method,
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def state(self):
+        return self.request("/api/state")
+
+    def act(self, action, **payload):
+        return self.request("/api/action", method="POST", body={"action": action, **payload})
+
+    def test_state_covers_every_card_and_row(self):
+        state = self.state()
+        self.assertTrue(state["demo"])
+        self.assertEqual(state["home"], demo.DEMO_HOME)
+        statuses = {c["status"] for c in state["candidates"]}
+        self.assertTrue({"pending", "writing", "draft", "draft_failed", "draft_invalid", "writer_rejected"} <= statuses)
+        kinds = {c["kind"] for c in state["candidates"]}
+        self.assertTrue({"skill", "memory", "rule", "decay"} <= kinds)
+        for group in ("skill", "memory", "rule"):
+            self.assertTrue(state["library"][group], f"library has no {group} entries")
+        self.assertTrue(state["archived"])
+
+    def test_accept_memory_moves_it_into_the_library(self):
+        state = self.state()
+        candidate = next(c for c in state["candidates"] if c["id"] == "memory-lean-deps")
+        result = self.act("accept", id=candidate["id"], scope="project", project="/tmp/demo-project")
+        self.assertEqual(result["status"], "active")
+        state = self.state()
+        self.assertNotIn(candidate["id"], [c["id"] for c in state["candidates"]])
+        entry = next(e for e in state["library"]["memory"] if e["title"] == candidate["title"])
+        self.assertEqual(entry["scope"], "project")
+        self.assertEqual(entry["project"], "/tmp/demo-project")
+
+    def test_accept_skill_writes_then_drafts(self):
+        with mock.patch.object(demo, "WRITER_DELAY", 0.01):
+            result = self.act("accept", id="skill-verify-backup")
+            self.assertEqual(result["status"], "writing")
+            time.sleep(0.3)
+        candidate = next(c for c in self.state()["candidates"] if c["id"] == "skill-verify-backup")
+        self.assertEqual(candidate["status"], "draft")
+        self.assertIn("## Steps", candidate["draft_preview"])
+
+    def test_install_moves_a_draft_into_the_library(self):
+        self.act("install", id="skill-tap-check")
+        state = self.state()
+        self.assertNotIn("skill-tap-check", [c["id"] for c in state["candidates"]])
+        self.assertTrue(
+            any(e["title"] == "Check the Homebrew tap before installing" for e in state["library"]["skill"])
+        )
+
+    def test_reject_and_decay_clear_the_queue(self):
+        self.act("reject", id="rule-no-force-push")
+        self.act("resolve_decay", id="decay-4f2a91c3d8", resolution="archive")
+        ids = [c["id"] for c in self.state()["candidates"]]
+        self.assertNotIn("rule-no-force-push", ids)
+        self.assertNotIn("decay-4f2a91c3d8", ids)
+
+    def test_entry_actions_round_trip(self):
+        self.act("entry_verify", id="memory-vault-creds")
+        self.act("entry_pin", id="memory-vault-creds", pinned=False)
+        entry = next(e for e in self.state()["library"]["memory"] if e["id"] == "memory-vault-creds")
+        self.assertFalse(entry["pinned"])
+        self.act("entry_archive", id="memory-vault-creds")
+        state = self.state()
+        self.assertNotIn("memory-vault-creds", [e["id"] for e in state["library"]["memory"]])
+        self.assertIn("memory-vault-creds", [e["id"] for e in state["archived"]])
+        self.act("entry_restore", id="memory-vault-creds")
+        self.assertIn("memory-vault-creds", [e["id"] for e in self.state()["library"]["memory"]])
+
+    def test_decay_resolution_touches_the_target_entry(self):
+        def target():
+            return next(e for e in self.state()["library"]["memory"] if e["id"] == "memory-openrouter-spend")
+
+        before = target()["last_verified"]
+        self.act("resolve_decay", id="decay-4f2a91c3d8", resolution="keep")
+        self.assertNotEqual(target()["last_verified"], before)
+
+    def test_demo_never_writes_to_the_home(self):
+        before = sorted(str(path) for path in self.home.rglob("*"))
+        self.act("install", id="skill-tap-check")
+        self.act("accept", id="memory-lean-deps")
+        self.act("entry_archive", id="backup-restore-drill")
+        after = sorted(str(path) for path in self.home.rglob("*"))
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

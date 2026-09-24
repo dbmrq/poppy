@@ -24,6 +24,7 @@ from .candidates import (
     mark_rejected,
     save_candidate,
 )
+from .demo import DemoBackend
 from .pipeline import accept, discard_draft
 from .skills import archive_skill, install_draft, restore_skill
 from .util import DATA_DIR, PoppyError, REPO_ROOT, tail
@@ -166,6 +167,7 @@ class Handler(BaseHTTPRequestHandler):
     home: Path
     cfg: dict
     token: str = ""
+    backend: DemoBackend | None = None  # set only in --demo mode
 
     def log_message(self, *args):  # keep the terminal quiet
         pass
@@ -206,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, INDEX_HTML.read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/api/state":
-            self._json(_state(self.home, self.cfg))
+            self._json(self.backend.state() if self.backend is not None else _state(self.home, self.cfg))
         else:
             self._json({"error": "not found"}, 404)
 
@@ -224,17 +226,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "invalid JSON"}, 400)
             return
         try:
-            result = handle_action(self.home, self.cfg, str(payload.get("action", "")), payload)
+            if self.backend is not None:
+                result = self.backend.action(str(payload.get("action", "")), payload)
+            else:
+                result = handle_action(self.home, self.cfg, str(payload.get("action", "")), payload)
         except PoppyError as exc:
             self._json({"error": str(exc)}, 400)
             return
         except Exception:
             self._json({"error": "internal error", "detail": tail(traceback.format_exc(), 800)}, 500)
             return
-        try:  # keep the always-on digest fresh; it is a cache, never fail the action
-            digest.export(self.home, self.cfg)
-        except Exception:
-            pass
+        if self.backend is None:
+            try:  # keep the always-on digest fresh; it is a cache, never fail the action
+                digest.export(self.home, self.cfg)
+            except Exception:
+                pass
         self._json(result)
 
 
@@ -245,6 +251,7 @@ def build_server(
     port: int | None = None,
     token: str | None = None,
     insecure: bool = False,
+    demo: bool = False,
 ) -> ThreadingHTTPServer:
     ui_cfg = cfg.get("ui") or {}
     bind_host = str(host or ui_cfg.get("host", "127.0.0.1"))
@@ -255,7 +262,10 @@ def build_server(
             f"refusing to bind {bind_host} without a token — anyone who can reach the port "
             "could change the library; pass --token <secret> (or --insecure to acknowledge the risk)"
         )
-    handler = type("PoppyHandler", (Handler,), {"home": home, "cfg": cfg, "token": token_value})
+    attrs = {"home": home, "cfg": cfg, "token": token_value}
+    if demo:
+        attrs["backend"] = DemoBackend()
+    handler = type("PoppyHandler", (Handler,), attrs)
     server = ThreadingHTTPServer((bind_host, bind_port), handler)
     server.token = token_value  # type: ignore[attr-defined]
     return server
@@ -268,10 +278,13 @@ def serve(
     port: int | None = None,
     token: str | None = None,
     insecure: bool = False,
+    demo: bool = False,
 ) -> int:
-    server = build_server(home, cfg, host=host, port=port, token=token, insecure=insecure)
+    server = build_server(home, cfg, host=host, port=port, token=token, insecure=insecure, demo=demo)
     bind_host, bind_port = server.server_address[0], server.server_address[1]
     print(f"poppy ui: http://{bind_host}:{bind_port}  (Ctrl-C to stop)")
+    if demo:
+        print("mode:     demo — mock data, nothing is read from or written to disk")
     if server.token:
         print("auth:     HTTP Basic — any username, the token as the password")
     elif bind_host not in LOOPBACK_HOSTS:

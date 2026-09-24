@@ -192,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, help="port (default: ui.port, 8788)")
     p.add_argument("--token", help="require HTTP Basic auth with this token as the password")
     p.add_argument("--insecure", action="store_true", help="allow a non-loopback bind without a token")
+    p.add_argument("--demo", action="store_true", help="serve mock data; actions never touch disk")
 
     p = sub.add_parser("doctor", help="check the installation")
     p.add_argument("--agent", action="store_true", help="also test the configured agent commands")
@@ -775,7 +776,15 @@ def cmd_decay(args, home: Path) -> int:
 
 def cmd_ui(args, home: Path) -> int:
     cfg = load_config(home)
-    return serve(home, cfg, host=args.host, port=args.port, token=args.token, insecure=args.insecure)
+    return serve(
+        home,
+        cfg,
+        host=args.host,
+        port=args.port,
+        token=args.token,
+        insecure=args.insecure,
+        demo=args.demo,
+    )
 
 
 def cmd_doctor(args, home: Path) -> int:
