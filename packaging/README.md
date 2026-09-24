@@ -38,23 +38,19 @@ The `release` workflow then:
 ## Homebrew
 
 The formula lives in the [`dbmrq/homebrew-tap`](https://github.com/dbmrq/homebrew-tap)
-tap. After a release, update it from the release artifacts:
+tap at `Formula/poppy-ai.rb` and keeps itself current: that repo's
+`update-poppy-ai.yml` reads PyPI daily (and can be run on demand) and commits
+only when the sdist url/sha256 changed. After a release, pull it in
+immediately with:
 
 ```bash
-cd <tap checkout>
-gh release download vX.Y.Z --repo dbmrq/poppy --pattern poppy-ai.rb --dir /tmp --clobber
-cp /tmp/poppy-ai.rb Formula/poppy-ai.rb
-git commit -am "Update poppy-ai to vX.Y.Z" && git push
+gh workflow run update-poppy-ai.yml --repo dbmrq/homebrew-tap
 ```
 
-Users install with:
-
-```bash
-brew tap dbmrq/tap && brew install poppy-ai
-```
-
-Bump the template's `depends_on "python@X.Y"` as Homebrew's default Python
-moves. `pipx install poppy-ai` remains the recommended path.
+Manual fallback: copy `poppy-ai.rb` from the GitHub release into `Formula/` and
+commit. Bump the template's `depends_on "python@X.Y"` as Homebrew's default
+Python moves. Users install with `brew tap dbmrq/tap && brew install poppy-ai`;
+`pipx install poppy-ai` remains the recommended path.
 
 ## If a release fails part-way
 
