@@ -48,6 +48,7 @@ JSON.
 | "Update Poppy" | `poppy update` (handles pipx, pip, and checkout installs; refreshes the builtin skills) |
 | "Uninstall Poppy" | `poppy purge` prints the plan; `poppy purge --yes` applies it, `--keep-data` keeps the library. Only after an explicit, informed decision |
 | "Is Poppy healthy?" | `poppy doctor --json`, `poppy status --json` |
+| "Review from another device" | `poppy ui --host <addr> --token <secret>` (HTTP Basic). Never bind a non-loopback address without a token |
 | "Why did mining miss X?" | `poppy sessions search "<term>" --json`; mining is bounded by the lookback window and the candidate cap |
 
 Notes: `poppy sync run` exits 1 when it synced changes and 2 on conflicts —

@@ -31,7 +31,7 @@ Paste this into your agent:
 
 Or paste the contents of [`install/PROMPT.md`](install/PROMPT.md) directly.
 
-The agent installs the `poppy-agent` package with pipx (or pip), falling back to a checkout when neither is available; `poppy update` keeps it current whichever way it was installed. Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
+The agent installs the `poppy-ai` package with pipx (or pip), falling back to a checkout when neither is available; `poppy update` keeps it current whichever way it was installed. Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
 
 ## Requirements
 
@@ -65,6 +65,16 @@ The miner explores transcripts through `poppy sessions list/search/read` (one de
 
 `~/.poppy` can be one private git repo shared by all your machines. `poppy sync init --remote <private-repo-url>` tracks the library, the candidate queue, and clean rejections; machine-local state (config, sources, mirrors, usage, logs) stays out. It also installs an **automatic sync timer** (every 30 minutes by default, `sync.interval_min`), so machines stay in sync without being prompted — `--no-schedule` opts out. `poppy sync run` commits, pulls, pushes, then reconciles skill mirrors and regenerates the memory digest. It soft-fails offline and retries; conflicts are surfaced for you to resolve, never auto-merged. Run the installer prompt on each machine with the same remote URL.
 
+## Remote review
+
+`poppy ui` binds localhost by default. To review from another device, bind an address and set a token (HTTP Basic; any username, the token as the password):
+
+```bash
+poppy ui --host 0.0.0.0 --token "$(openssl rand -hex 16)"
+```
+
+A non-loopback bind without a token is refused unless you pass `--insecure`. The token can also live in config (`poppy config set ui.token <secret>`) so it stays out of process listings. POSTs must be `application/json`, so a cross-site form cannot act on the library, but the UI can accept skills — treat the port as an admin endpoint. For remote access prefer an SSH tunnel or an authenticating proxy (Cloudflare Access, Tailscale); pass `--insecure` only when the port itself is unreachable from untrusted networks.
+
 ## Uninstall
 
 ```bash
@@ -73,7 +83,7 @@ poppy purge --yes        # removes the schedule, mirrors, digest wiring, and ~/.
 poppy purge --yes --keep-data   # same, but keeps the library and queue
 ```
 
-Only skills Poppy manages are removed — your own skills are never touched — and the CLI itself is left in place with a printed removal command (`pipx uninstall poppy-agent`, `pip uninstall poppy-agent`, or removing the checkout). Without `--yes`, nothing happens.
+Only skills Poppy manages are removed — your own skills are never touched — and the CLI itself is left in place with a printed removal command (`pipx uninstall poppy-ai`, `pip uninstall poppy-ai`, or removing the checkout). Without `--yes`, nothing happens.
 
 ## Publishing
 
@@ -92,7 +102,8 @@ poppy init              create ~/.poppy (config, sources, library, builtins)
 poppy sources list|test|add
 poppy sessions list|search|read     transcript toolbox
 poppy mine [--since 14d] [--dry-run] mine recent sessions for candidates
-poppy ui                review queue + library (localhost only)
+poppy ui [--host H] [--token T]
+                        review queue + library (localhost by default)
 poppy accept <id>       skill: run writer agent; memory/rule: accept into library
 poppy reject <id> [--reason "..."]
 poppy discard <id>      drop a skill draft and return the candidate to pending

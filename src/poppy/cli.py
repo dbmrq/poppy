@@ -187,8 +187,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--resolve", help="resolve a decay proposal by id")
     p.add_argument("--resolution", choices=("archive", "keep", "pin"))
 
-    p = sub.add_parser("ui", help="serve the review UI (localhost only)")
-    p.add_argument("--port", type=int)
+    p = sub.add_parser("ui", help="serve the review UI (localhost by default)")
+    p.add_argument("--host", help="bind address (default: ui.host, 127.0.0.1)")
+    p.add_argument("--port", type=int, help="port (default: ui.port, 8788)")
+    p.add_argument("--token", help="require HTTP Basic auth with this token as the password")
+    p.add_argument("--insecure", action="store_true", help="allow a non-loopback bind without a token")
 
     p = sub.add_parser("doctor", help="check the installation")
     p.add_argument("--agent", action="store_true", help="also test the configured agent commands")
@@ -771,9 +774,7 @@ def cmd_decay(args, home: Path) -> int:
 
 def cmd_ui(args, home: Path) -> int:
     cfg = load_config(home)
-    if args.port:
-        cfg.setdefault("ui", {})["port"] = args.port
-    return serve(home, cfg)
+    return serve(home, cfg, host=args.host, port=args.port, token=args.token, insecure=args.insecure)
 
 
 def cmd_doctor(args, home: Path) -> int:

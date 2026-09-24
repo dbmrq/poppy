@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "poppy-agent"
+name = "poppy-ai"
 description = "Turn coding-agent session history into reviewed skills, memories, and rules."
 readme = "README.md"
 requires-python = ">=3.10"

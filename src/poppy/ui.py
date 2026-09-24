@@ -1,7 +1,15 @@
-"""The local review UI: candidates in, library entries out. Localhost only."""
+"""The local review UI: candidates in, library entries out.
+
+Binds localhost by default. A non-loopback bind requires a token (HTTP Basic;
+any username, the token as the password) unless `--insecure` explicitly
+acknowledges the risk; POSTs must be `application/json`, so a cross-site form
+cannot act on the library.
+"""
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import threading
 import traceback
@@ -22,6 +30,18 @@ from .util import DATA_DIR, PoppyError, REPO_ROOT, tail
 
 INDEX_HTML = DATA_DIR / "ui" / "index.html"
 QUEUE_STATUSES = {"pending", "writing", "draft", "draft_invalid", "draft_failed", "writer_rejected"}
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _basic_password(header: str) -> str:
+    if not header.startswith("Basic "):
+        return ""
+    try:
+        decoded = base64.b64decode(header[6:].strip(), validate=True).decode("utf-8", "replace")
+    except ValueError:
+        return ""
+    _user, _sep, password = decoded.partition(":")
+    return password
 
 
 def _state(home: Path, cfg: dict) -> dict:
@@ -145,22 +165,41 @@ def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
 class Handler(BaseHTTPRequestHandler):
     home: Path
     cfg: dict
+    token: str = ""
 
     def log_message(self, *args):  # keep the terminal quiet
         pass
 
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
+    def _send(self, code: int, body: bytes, content_type: str, headers: dict | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(body)
 
     def _json(self, payload, code: int = 200) -> None:
         self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
 
+    def _authorized(self) -> bool:
+        if not self.token:
+            return True
+        password = _basic_password(self.headers.get("Authorization") or "")
+        if password and hmac.compare_digest(password, self.token):
+            return True
+        self._send(
+            401,
+            b"authentication required\n",
+            "text/plain; charset=utf-8",
+            {"WWW-Authenticate": 'Basic realm="poppy"'},
+        )
+        return False
+
     def do_GET(self):  # noqa: N802 (http.server API)
+        if not self._authorized():
+            return
         if self.path in ("/", "/index.html"):
             if not INDEX_HTML.is_file():
                 self._json({"error": "ui/index.html missing"}, 500)
@@ -172,6 +211,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):  # noqa: N802
+        if not self._authorized():
+            return
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            self._json({"error": "Content-Type must be application/json"}, 415)
+            return
         length = int(self.headers.get("Content-Length") or 0)
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -193,13 +238,44 @@ class Handler(BaseHTTPRequestHandler):
         self._json(result)
 
 
-def serve(home: Path, cfg: dict) -> int:
+def build_server(
+    home: Path,
+    cfg: dict,
+    host: str | None = None,
+    port: int | None = None,
+    token: str | None = None,
+    insecure: bool = False,
+) -> ThreadingHTTPServer:
     ui_cfg = cfg.get("ui") or {}
-    host = str(ui_cfg.get("host", "127.0.0.1"))
-    port = int(ui_cfg.get("port", 8788))
-    handler = type("PoppyHandler", (Handler,), {"home": home, "cfg": cfg})
-    server = ThreadingHTTPServer((host, port), handler)
-    print(f"poppy ui: http://{host}:{port}  (Ctrl-C to stop)")
+    bind_host = str(host or ui_cfg.get("host", "127.0.0.1"))
+    bind_port = int(port if port is not None else ui_cfg.get("port", 8788))
+    token_value = str(token if token is not None else (ui_cfg.get("token") or ""))
+    if bind_host not in LOOPBACK_HOSTS and not token_value and not insecure:
+        raise PoppyError(
+            f"refusing to bind {bind_host} without a token — anyone who can reach the port "
+            "could change the library; pass --token <secret> (or --insecure to acknowledge the risk)"
+        )
+    handler = type("PoppyHandler", (Handler,), {"home": home, "cfg": cfg, "token": token_value})
+    server = ThreadingHTTPServer((bind_host, bind_port), handler)
+    server.token = token_value  # type: ignore[attr-defined]
+    return server
+
+
+def serve(
+    home: Path,
+    cfg: dict,
+    host: str | None = None,
+    port: int | None = None,
+    token: str | None = None,
+    insecure: bool = False,
+) -> int:
+    server = build_server(home, cfg, host=host, port=port, token=token, insecure=insecure)
+    bind_host, bind_port = server.server_address[0], server.server_address[1]
+    print(f"poppy ui: http://{bind_host}:{bind_port}  (Ctrl-C to stop)")
+    if server.token:
+        print("auth:     HTTP Basic — any username, the token as the password")
+    elif bind_host not in LOOPBACK_HOSTS:
+        print("warning:  no token set — anyone who can reach this port can change the library")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

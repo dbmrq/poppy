@@ -21,7 +21,7 @@ DEFAULT_CONFIG = {
         "miner": {"cmd": None, "timeout_sec": 1800},
         "writer": {"cmd": None, "timeout_sec": 900},
     },
-    "ui": {"host": "127.0.0.1", "port": 8788},
+    "ui": {"host": "127.0.0.1", "port": 8788, "token": ""},
     "publish": {"target": "", "subdir": ""},
     "sync": {
         "enabled": False,

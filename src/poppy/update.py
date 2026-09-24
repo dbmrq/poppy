@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .util import PACKAGE_DIR, PoppyError, REPO_ROOT, launch_command, tail
 
-DIST_NAME = "poppy-agent"
+DIST_NAME = "poppy-ai"
 UPDATE_TIMEOUT = 300
 
 

@@ -190,7 +190,8 @@ Summarize concisely:
 - agent commands configured (miner, writer)
 - skills directories
 - schedule state
-- how to review the queue (`poppy ui`), how to load memories (`poppy library show <ref>`, indexed in the digest)
+- how to review the queue (`poppy ui`; for another device, `poppy ui --host <addr> --token <secret>`)
+- how to load memories (`poppy library show <ref>`, indexed in the digest)
 - that the builtin skills are installed, so the user can ask you to operate Poppy (review, library, mining, sync, publish, doctor)
 - how to share a reviewed skill (`poppy publish <name> --to <checkout of a public skills repo>`)
 - how to remove Poppy later (`poppy purge` previews; `poppy purge --yes` removes everything, `--keep-data` keeps the library)
