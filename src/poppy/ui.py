@@ -9,7 +9,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import decay, library
+from . import decay, digest, library
 from .candidates import (
     drafts_candidate_dir,
     list_candidates,
@@ -189,11 +189,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "invalid JSON"}, 400)
             return
         try:
-            self._json(handle_action(self.home, self.cfg, str(payload.get("action", "")), payload))
+            result = handle_action(self.home, self.cfg, str(payload.get("action", "")), payload)
         except PoppyError as exc:
             self._json({"error": str(exc)}, 400)
+            return
         except Exception:
             self._json({"error": "internal error", "detail": tail(traceback.format_exc(), 800)}, 500)
+            return
+        try:  # keep the always-on digest fresh; it is a cache, never fail the action
+            digest.export(self.home, self.cfg)
+        except Exception:
+            pass
+        self._json(result)
 
 
 def serve(home: Path, cfg: dict) -> int:

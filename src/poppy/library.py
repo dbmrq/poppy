@@ -41,6 +41,7 @@ META_ORDER = [
     "last_verified",
     "archived_at",
     "source_candidate",
+    "trigger",
 ]
 
 BUILTIN_DIR = REPO_ROOT / "builtin"
@@ -174,9 +175,22 @@ def list_entries(home: Path, kinds=None, include_archived: bool = False) -> list
 
 
 def find_entry(home: Path, entry_id: str, include_archived: bool = True) -> Entry:
-    for entry in list_entries(home, include_archived=include_archived):
+    """Find an entry by full id, id prefix, or unique hash-prefix (>= 4 chars)."""
+    entries = list_entries(home, include_archived=include_archived)
+    for entry in entries:
         if entry.id == entry_id:
             return entry
+    if len(entry_id) >= 4:
+        matches = [
+            entry
+            for entry in entries
+            if entry.id.startswith(entry_id) or entry.id.split("-")[-1].startswith(entry_id)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            names = ", ".join(entry.id for entry in matches)
+            raise PoppyError(f"ambiguous entry id {entry_id!r}: matches {names}")
     raise PoppyError(f"unknown entry: {entry_id}")
 
 
@@ -216,6 +230,9 @@ def create_fact_entry(home: Path, candidate: dict, scope: str | None = None, pro
         "last_verified": now_iso(),
         "source_candidate": candidate["id"],
     }
+    trigger = str(candidate.get("trigger", "")).strip()
+    if trigger:
+        meta["trigger"] = trigger
     if scope == "machine":
         meta["machine"] = host_name()
     if scope == "project":

@@ -1,29 +1,33 @@
 ---
 name: poppy-context
 description: >-
-  Load Poppy memories and rules that apply to the current machine and project.
-  Use when starting non-trivial work, when the user references past decisions
-  or preferences, or before acting on project conventions.
+  Fetch full Poppy memory entries whose headlines appear in the Poppy memory
+  index. Use when a headline seems relevant to the task, when the user
+  references past decisions or preferences, or before acting on project
+  conventions.
 ---
 
 # Poppy context
 
-Poppy keeps durable memories and rules about the user, this machine, and this
-project. They are managed under `~/.poppy/library` (never mixed into user
-files) and every entry is backed by evidence from real sessions.
+Your context contains a generated **Poppy memory index** (wired in by the
+installer): binding rules in full, plus one-line headlines for memories and
+scoped rules. The headlines tell you what exists without loading everything.
 
-Before non-trivial work — or whenever you are unsure about a convention,
-preference, or past decision — load the entries that apply here:
+When a headline seems relevant, fetch the full entry **before acting**:
 
 ```bash
-poppy context
+poppy library show <ref>
 ```
 
-- `poppy context --json` prints the same content as JSON.
-- `poppy library list` shows everything Poppy knows (skills, memories, rules).
-- Entries are reviewed and evidence-backed; treat them as high-confidence but
-  not infallible. If one contradicts what you observe, say so — the user can
-  verify, pin, or archive it in `poppy ui`.
+- `<ref>` is the short id in parentheses, e.g. `(1a2b3c)`; unique prefixes work.
+- `poppy library list` shows everything Poppy knows.
+- `poppy context show` prints the entries that apply to this machine and
+  project.
+- Poppy entries are evidence-backed but not infallible. If one contradicts what
+  you observe, say so — the user can verify, pin, or archive it in `poppy ui`.
+
+If you do not see a Poppy memory index block in your context at all, run
+`poppy context show` instead and tell the user the index is not wired in.
 
 Do not edit files under `~/.poppy` by hand: the user reviews and promotes
 changes through the Poppy UI, and manual edits break the provenance chain.

@@ -70,8 +70,24 @@ class TestCli(unittest.TestCase):
         code, output = self.run_cli("context")
         self.assertEqual(code, 0, output)
 
-        code, output = self.run_cli("context", "--brief")
+        code, output = self.run_cli("context", "show", "--brief")
         self.assertEqual(code, 0, output)
+
+        code, output = self.run_cli("context", "export")
+        self.assertEqual(code, 0, output)
+        self.assertIn("digest", output)
+
+        code, output = self.run_cli("context", "status")
+        self.assertEqual(code, 0, output)
+
+        wire_target = Path(self.tmp.name) / "AGENTS.md"
+        code, output = self.run_cli("context", "wire", "--file", str(wire_target))
+        self.assertEqual(code, 0, output)
+        self.assertTrue(wire_target.is_file())
+
+        code, output = self.run_cli("context", "unwire", "--file", str(wire_target))
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("poppy:begin", wire_target.read_text(encoding="utf-8"))
 
         code, output = self.run_cli("decay")
         self.assertEqual(code, 0, output)

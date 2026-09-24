@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from . import decay as decay_mod
+from . import digest
 from . import library
 from .candidates import list_candidates, load_candidate
 from .config import (
@@ -126,10 +127,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("installed", help="list poppy-managed skills")
     p.add_argument("--json", action="store_true")
 
-    p = sub.add_parser("context", help="print memories and rules that apply here")
-    p.add_argument("--cwd", help="directory to resolve project scope for (default: cwd)")
-    p.add_argument("--brief", action="store_true", help="compact output for injection (capped; empty when nothing applies)")
-    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("context", help="show or materialize the memory index")
+    csub = p.add_subparsers(dest="context_command")
+    cs = csub.add_parser("show", help="print memories and rules that apply here")
+    cs.add_argument("--cwd", help="directory to resolve project scope for (default: cwd)")
+    cs.add_argument("--brief", action="store_true", help="compact output (capped; empty when nothing applies)")
+    cs.add_argument("--json", action="store_true")
+    csub.add_parser("export", help="regenerate the always-on digest file")
+    cw = csub.add_parser("wire", help="insert the digest as a managed block into a context file")
+    cw.add_argument("--file", required=True)
+    cu = csub.add_parser("unwire", help="remove a wired digest block")
+    cu.add_argument("--file", required=True)
+    csub.add_parser("status", help="check digest freshness and wiring")
+    csub.add_parser("verify", help="prove the digest reaches a headless session")
+    p.set_defaults(context_command="show", cwd=None, brief=False, json=False)
 
     p = sub.add_parser("library", help="inspect and manage the canonical library")
     lsub = p.add_subparsers(dest="library_command", required=True)
@@ -203,7 +214,7 @@ def _print_sessions(sessions: list, as_json: bool) -> None:
         title = tail(session.title or session.cwd or "", 60)
         size = human_size(session.size) if session.size else "-"
         print(
-            f"{session.source:<12} {session.id[:36]:<36} {human_time(session.time):<16} "
+            f"{session.source:<12} {session.id:<36} {human_time(session.time):<16} "
             f"{size:>7}  {title}"
         )
 
@@ -318,7 +329,7 @@ def cmd_sessions(args, home: Path) -> int:
             print(json.dumps([h.__dict__ for h in hits], indent=2))
         else:
             for hit in hits:
-                print(f"{hit.source:<12} {hit.session[:28]:<28} :{hit.line:<5} {tail(hit.snippet, 90)}")
+                print(f"{hit.source:<12} {hit.session:<36} :{hit.line:<5} {tail(hit.snippet, 90)}")
             if not hits:
                 print("(no matches)")
         return 0
@@ -461,6 +472,50 @@ def _brief_text(context: dict) -> str:
 
 def cmd_context(args, home: Path) -> int:
     cfg = load_config(home)
+    command = getattr(args, "context_command", None) or "show"
+
+    if command == "export":
+        result = digest.export(home, cfg)
+        print(
+            f"digest: {result['path']}\n"
+            f"  {result['chars']} chars · {result['binding_rules']} binding rule(s) · "
+            f"{result['memories']} memory headline(s) · {result['scoped_rules']} scoped rule(s)"
+            + (f" · {result['dropped']} dropped" if result.get("dropped") else "")
+        )
+        return 0
+
+    if command == "wire":
+        result = digest.wire(home, cfg, Path(args.file))
+        print(f"wired digest into {result['file']} (managed block)")
+        print("prove it reaches sessions with `poppy context verify`")
+        return 0
+
+    if command == "unwire":
+        result = digest.unwire(home, cfg, Path(args.file))
+        print(f"removed digest block from {result['file']}")
+        return 0
+
+    if command == "status":
+        status = digest.status(home, cfg)
+        print(f"digest:    {status['digest']}")
+        print(f"exists:    {'yes' if status['exists'] else 'no'}")
+        print(f"generated: {status['generated_at'] or '-'}")
+        print(f"fresh:     {'yes' if status['fresh'] else 'no — run `poppy context export`'}")
+        if status["stats"]:
+            print(f"content:   {status['stats']}")
+        if status["targets"]:
+            for target in status["targets"]:
+                mark = "✓" if target["exists"] and target["block"] else "✗"
+                print(f" {mark} wired: {target['file']}")
+        else:
+            print("wired:     nowhere yet — `poppy context wire --file <path>` or a native include")
+        return 0
+
+    if command == "verify":
+        ok, detail = digest.verify(home, cfg)
+        print(f"{'✓' if ok else '✗'} {detail}")
+        return 0 if ok else 1
+
     cwd = Path(args.cwd).expanduser() if args.cwd else Path.cwd()
     context = library.build_context(home, cfg, cwd=cwd)
     if args.brief:
@@ -686,6 +741,9 @@ def cmd_selftest(args, home: Path) -> int:
 # --------------------------------------------------------------------------- dispatch
 
 
+REFRESH_COMMANDS = {"accept", "install", "uninstall", "library", "decay", "mine", "init"}
+
+
 def dispatch(args, home: Path) -> int:
     handlers = {
         "init": cmd_init,
@@ -707,7 +765,13 @@ def dispatch(args, home: Path) -> int:
         "status": cmd_status,
         "selftest": cmd_selftest,
     }
-    return handlers[args.command](args, home)
+    code = handlers[args.command](args, home)
+    if args.command in REFRESH_COMMANDS:
+        try:  # the digest is a cache; never let a refresh failure break a command
+            digest.export(home, load_config(home))
+        except Exception:
+            pass
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:

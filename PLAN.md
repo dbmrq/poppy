@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V2** (skills, memories, rules, decay). This document is the persistent design and is updated as phases land.
+Status: **V2.5** (skills, memories, rules, decay, materialized memory index). This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -194,7 +194,7 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 | Miner hallucinates a quote | candidate discarded at validation | evidence gate; nothing reaches the UI |
 | Harness changes its storage format | source stops resolving | `doctor` / `sources test` flags it; fix is a config edit (re-run the installer prompt) |
 | Transcripts rotate away | evidence still available | excerpts are stored with the candidate at validation time |
-| Agent skips loading memories | context not applied | V2.5 hook injection (harness-side); the skill remains a fallback |
+| Agent skips loading memories | context not applied | the memory index is materialized into context files (V2.5), so headlines are always visible; full entries are one `poppy library show` away |
 | Schedule never fires | no new candidates | `poppy schedule status` shows the timer; installer fires one run to prove it |
 | UI unavailable | no effect on data | queue is files on disk; CLI can accept/reject/install |
 
@@ -216,12 +216,13 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 - **No user-file writes:** Poppy never edits `AGENTS.md`, memory directories, or any file outside `~/.poppy`. Rules are surfaced on demand via `poppy context`; materializing a managed block into AGENTS.md is explicitly deferred (V3+) to avoid entangling user-managed context files — derive such blocks, never sync them.
 - **Usage tracking:** `poppy context` records `last_used` in `~/.poppy/state/usage.json` (state, not library, so library files stay stable under sync).
 
-**V2.5 — memory delivery (next).** Loading memories through the `poppy-context` skill is *discretionary*: the agent decides whether to invoke it, and agents sometimes won't. Delivery must therefore be harness-side, not agent-side:
+**V2.5 — memory delivery: progressive disclosure (done).** Loading memories is only reliable if the agent sees *that they exist* without loading them all. Poppy therefore materializes one generated digest, `~/.poppy/context/poppy.md`:
 
-- **Primary:** small adapters that run `poppy context --brief` at session start and inject the result — an OpenCode plugin (`session.hook("context")`) and a Pi extension (`before_agent_start`). The harness runs it; the agent cannot skip it. Rules (few, always-on) are injected whole; memories are capped, and the command prints nothing when nothing applies, so injection is a no-op otherwise.
-- **Fallback:** the `poppy-context` skill for harnesses without hooks, plus an optional one-line pointer in the global AGENTS.md that the installer adds only with the user's consent.
-- **Rejected:** injecting everything, and writing memory digests into user context files. Context rot is real; the research consensus is minimal, scoped, on-demand context plus a small always-on rule set.
-- The brief output deliberately omits skills (the harness already lists them) and never includes evidence (available via `poppy library show`).
+- **Binding rules in full** (user + this-machine scope; few by design, and constraints must be exact).
+- **Headlines only** for memories and scoped rules: `- [scope] Title (ref) — trigger`, with an explicit "fetch before acting" instruction.
+- **Full entries on demand:** `poppy library show <ref>` (unique short refs work).
+
+The digest is regenerated deterministically after every approval, archive, pin, install, and sync; it has hard budgets (20 binding rules, 40 headlines, 8 KB) and drops the least-used entries with a note. The installer wires it into the harness's native include mechanism where one exists, or inserts a delimited managed block (`poppy context wire --file …`), and must prove visibility with `poppy context verify` (a canary headless run). Nothing executes at session time, and there is no per-harness code: delivery is files, placement is installer configuration, and the proof is a passing test. `pin` remains only a decay exemption — "must always apply" is what rules are for.
 
 **V3 — sync + scopes.** One private data repo per user; per-machine inbox namespaces; derived indexes regenerated locally; an automatic sync agent (systemd/launchd) that commits, rebases, pushes, and materializes after every pull. Scopes: user > machine > project > task, resolved at read/install time.
 

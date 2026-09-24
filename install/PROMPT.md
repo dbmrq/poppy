@@ -82,7 +82,30 @@ poppy config set skills_dirs '["~/.agents/skills"]'
 
 At least one directory must be writable.
 
-## 5. Schedule
+## 5. Wire the memory index
+
+Poppy materializes a small always-on digest at `~/.poppy/context/poppy.md`: binding rules in full, plus one-line headlines for memories and scoped rules. Wire it into the mechanism you already use for global instructions, so every session sees it without any runtime hook:
+
+```bash
+poppy context export
+```
+
+- **Preferred:** point your harness's native include/instructions mechanism at that file (for example, OpenCode's `instructions` config entry, or an import of `~/.poppy/context/poppy.md` in Claude Code's `CLAUDE.md`). This keeps Poppy content in its own file.
+- **Otherwise:** insert a managed block into your global context file (`AGENTS.md`, `CLAUDE.md`, …):
+
+```bash
+poppy context wire --file <path-to-global-context-file>
+```
+
+Then prove it actually reaches sessions:
+
+```bash
+poppy context verify
+```
+
+`verify` starts a headless session and asks the model to quote a line from the digest; it fails if the block is not visible. Fix the wiring and retry until it passes. Do not claim success without a passing verify.
+
+## 6. Schedule
 
 Ask the user before installing a weekly job. Then:
 
@@ -93,7 +116,7 @@ poppy schedule status
 
 Do **not** wait for the timer to fire; prove the pipeline with a manual run instead.
 
-## 6. First mining run
+## 7. First mining run
 
 Ask the user for a lookback window (default: 7 days for the first run). Then:
 
@@ -111,7 +134,7 @@ In the UI: accepting a skill runs a writer agent and produces a `SKILL.md`; acce
 
 No candidates is an acceptable outcome — say so plainly rather than forcing candidates. If every candidate was rejected as invalid, read `~/.poppy/logs/mine-*.log`, fix the likely cause (usually a source or agent configuration problem), and retry once.
 
-## 7. Report
+## 8. Report
 
 Summarize concisely:
 
@@ -119,7 +142,8 @@ Summarize concisely:
 - agent commands configured (miner, writer)
 - skills directories
 - schedule state
-- how to review the queue (`poppy ui`), how to load memories (`poppy context`)
+- how to review the queue (`poppy ui`), how to load memories (`poppy library show <ref>`, indexed in the digest)
+- memory index wiring: where you wired it, and that `poppy context verify` passed
 - anything that failed or could not be verified
 
 Never claim success for a step you did not verify.

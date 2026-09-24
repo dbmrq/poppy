@@ -42,7 +42,9 @@ weekly scheduler ──▶ miner agent ──▶ candidates ──▶ validation
                                    library/skills/                     library/memory|rules/
                                           │                                   │
                                           ▼                                   ▼
-                                   harness mirrors                    poppy context (on demand)
+                                   harness mirrors                    memory index digest
+                                                                      (headlines; full entry via
+                                                                       `poppy library show <ref>`)
 ```
 
 The miner explores transcripts through `poppy sessions list/search/read` (one deterministic interface for every harness) and writes candidates with verified quotes. Poppy validates schema, evidence, secrets, and duplicates. Accepting a **skill** runs a writer agent that turns the candidate into a spec-compliant `SKILL.md`; accepting a **memory** or **rule** writes a scoped entry directly. Everything Poppy manages lives in `~/.poppy/library` — never mixed into your own skills or context files. Skills are mirrored into the skill directories you configure; memories and rules are surfaced on demand via `poppy context`. A deterministic decay scan proposes stale entries for archive; nothing is removed without your approval.
@@ -58,7 +60,7 @@ poppy ui                review queue + library (localhost only)
 poppy accept <id>       skill: run writer agent; memory/rule: accept into library
 poppy install <id>      install a validated skill draft (library + mirrors)
 poppy uninstall <name>
-poppy context [--brief] [--json]  print memories and rules that apply here
+poppy context show|export|wire|unwire|status|verify
 poppy library list|show|verify|pin|unpin|archive|restore|adopt
 poppy decay             scan for stale entries; resolve in the UI
 poppy doctor [--agent]  verify the installation

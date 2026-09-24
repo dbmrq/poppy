@@ -214,7 +214,10 @@ def validate_raw(raw, home: Path, cfg: dict, sources: list) -> tuple[dict | None
             errors.append(f"{label}: {exc}")
             continue
         if not ok:
-            errors.append(f"{label}: quote not found in {source_name}:{session}")
+            errors.append(
+                f"{label}: quote not found in {source_name}:{session} "
+                "(unknown session, or the text no longer matches)"
+            )
             continue
         verified.append({"source": source_name, "session": session, "quote": quote, "excerpt": excerpt})
 

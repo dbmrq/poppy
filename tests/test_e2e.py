@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -6,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from poppy import library  # noqa: E402
+from poppy import digest, library  # noqa: E402
 from poppy.candidates import load_candidate, save_candidate  # noqa: E402
 from poppy.config import load_config, save_config  # noqa: E402
 from poppy.doctor import run_checks  # noqa: E402
@@ -132,6 +133,17 @@ class TestEndToEnd(unittest.TestCase):
 
         context = library.build_context(self.home, self.cfg, mark_used=False)
         self.assertIn("Prefers pinned, reproducible builds", [e["title"] for e in context["memories"]])
+
+        # progressive disclosure: the digest shows a headline, not the body; the
+        # full entry is fetched by short ref
+        digest.export(self.home, self.cfg)
+        digest_text = digest.digest_path(self.home).read_text(encoding="utf-8")
+        self.assertIn("Prefers pinned, reproducible builds", digest_text)
+        self.assertIn("when configuring package managers", digest_text)
+        self.assertNotIn("Daniel prefers builds to pin", digest_text)
+        match = re.search(r"\((\w{6})\)", digest_text)
+        self.assertIsNotNone(match)
+        self.assertEqual(library.find_entry(self.home, match.group(1)).id, memory_entry.id)
 
         # skill: writer -> draft -> install
         result = accept(self.home, skill_id)
