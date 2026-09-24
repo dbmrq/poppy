@@ -123,6 +123,26 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn("sync:", output)
 
+    @mock.patch("poppy.config.detect_skills_dirs", return_value=[])
+    def test_publish_command(self, _mock_detect):
+        self.run_cli("init")
+        skill_dir = self.home / "library" / "skills" / "widget-deploys"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: widget-deploys\ndescription: Deploy the widget. Use when releasing.\n---\n\nRun the deploy script.\n",
+            encoding="utf-8",
+        )
+        target = Path(self.tmp.name) / "public"
+        target.mkdir()
+
+        code, output = self.run_cli("publish", "widget-deploys", "--to", str(target))
+        self.assertEqual(code, 0, output)
+        self.assertTrue((target / "widget-deploys" / "SKILL.md").is_file())
+
+        code, output = self.run_cli("publish", "widget-deploys", "--to", str(target))
+        self.assertEqual(code, 0, output)
+        self.assertIn("already published", output)
+
 
 if __name__ == "__main__":
     unittest.main()

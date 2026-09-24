@@ -175,6 +175,7 @@ Summarize concisely:
 - skills directories
 - schedule state
 - how to review the queue (`poppy ui`), how to load memories (`poppy library show <ref>`, indexed in the digest)
+- how to share a reviewed skill (`poppy publish <name> --to <checkout of a public skills repo>`)
 - memory index wiring: where you wired it, and that `poppy context verify` passed
 - sync (if enabled): the remote, and that `poppy sync status` is clean
 - anything that failed or could not be verified

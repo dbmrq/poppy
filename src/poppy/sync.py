@@ -53,16 +53,16 @@ rejected/invalid-*.json
 # --------------------------------------------------------------------------- git
 
 
-def git(home: Path, args: list[str], check: bool = False, timeout: int = LOCAL_TIMEOUT):
-    if not home.is_dir():
-        raise PoppyError(f"poppy home does not exist: {home} — run `poppy init` first")
+def git(cwd: Path, args: list[str], check: bool = False, timeout: int = LOCAL_TIMEOUT):
+    if not cwd.is_dir():
+        raise PoppyError(f"directory does not exist: {cwd}")
     env = dict(os.environ)
     env.setdefault("GIT_TERMINAL_PROMPT", "0")
     env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
     try:
         proc = subprocess.run(
             ["git", *args],
-            cwd=str(home),
+            cwd=str(cwd),
             capture_output=True,
             text=True,
             timeout=timeout,

@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V3.5** (skills, memories, rules, decay, memory index, multi-machine sync, installer polish). This document is the persistent design and is updated as phases land.
+Status: **V4 in progress** — the publishing flow and CI landed; packaging, remote UI, and broader source coverage remain. Earlier phases (V1–V3.5) are done. This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -237,11 +237,14 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 - **Reuse an existing data repo.** Before creating one, the installer reuses `sync.remote` when this machine is already configured, asks whether the user has a Poppy data repo from another machine, and otherwise checks the user's account for one (a `library/` tree plus the Poppy `.gitignore` header). It offers to reuse what it finds and never adopts a repo without explicit confirmation. `poppy sync status` points at the same path when sync is not initialized.
 - **Model selection for miner and writer.** The miner is the quality bottleneck (long-context judgment across many sessions, tool use); the writer is a constrained rewrite of one accepted candidate. The installer lists the models it can actually use, proposes concrete options with cost/quality trade-offs (one model for both / strong miner + cheap writer / strongest for both, or the CLI default), gets the user's approval, bakes model flags into `agent.miner.cmd` and `agent.writer.cmd`, and verifies both with `poppy doctor --agent`.
 
-**V4 — productize.** More sources verified by the installer, packaging, remote UI option, publishing flow from the private library to a public skills repo.
+**V4 — productize (in progress).**
+
+- **Publishing (done).** `poppy publish <skill> --to <checkout> [--subdir …] [--commit] [--push] [--force]` exports one reviewed skill into a public skills repo: validation is re-run, a destination that differs is never overwritten without `--force`, machine-specific details (home path, hostname) produce warnings, and the target checkout can be committed/pushed for you. The private library stays the working set; the public repo is a curated subset.
+- **CI (done).** GitHub Actions runs the stdlib test suite (Python 3.10 and 3.13) on every push and pull request.
+- **Still open:** packaging (`pipx`/single-file install, Homebrew tap, a `poppy doctor` update check — see nice-to-haves), a remote review-UI option, and more sources verified by the installer.
 
 ### Nice-to-haves (recorded, not yet built)
 
-- **CI on push:** a GitHub Actions workflow running `python3 -m unittest discover -s tests -t .` for every push/PR — cheap insurance for a stdlib-only repo.
 - **Mid-session proposals:** a small `poppy propose` CLI plus a builtin skill so an interactive agent can file a candidate (with evidence) the moment it learns something, instead of waiting for the scheduled miner. Must reuse the same validation (quotes, secrets, dedupe) and land in the same queue.
 - **Miner follow-ups:** track entry usage from transcripts (a skill loaded mid-session is visible in the session JSON) so decay can use real usage rather than age alone.
 - **Packaging:** `pipx`/single-file install, a Homebrew tap, and a `poppy doctor` check for outdated installs.

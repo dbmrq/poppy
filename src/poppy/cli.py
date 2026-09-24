@@ -12,6 +12,7 @@ from . import __version__
 from . import decay as decay_mod
 from . import digest
 from . import library
+from . import publish as publish_mod
 from . import sync as sync_mod
 from .candidates import list_candidates, load_candidate
 from .config import (
@@ -190,6 +191,14 @@ def build_parser() -> argparse.ArgumentParser:
     sr.add_argument("--quiet", action="store_true")
     ss = ssub.add_parser("status", help="show repo, remote, and materialization state")
     ss.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("publish", help="copy a reviewed skill into a public skills repo checkout")
+    p.add_argument("name")
+    p.add_argument("--to", help="path to a checkout of the public repo (default: publish.target)")
+    p.add_argument("--subdir", help="subdirectory inside the target (default: publish.subdir)")
+    p.add_argument("--commit", action="store_true", help="commit the change in the target repo")
+    p.add_argument("--push", action="store_true", help="commit and push")
+    p.add_argument("--force", action="store_true", help="overwrite a destination that differs")
 
     sub.add_parser("status", help="summary of home, queue, and schedule")
     sub.add_parser("selftest", help="run the bundled test suite")
@@ -804,6 +813,31 @@ def cmd_sync(args, home: Path) -> int:
     return 0
 
 
+def cmd_publish(args, home: Path) -> int:
+    cfg = load_config(home)
+    result = publish_mod.publish(
+        home,
+        cfg,
+        args.name,
+        target=args.to,
+        subdir=args.subdir,
+        commit=args.commit,
+        push=args.push,
+        force=args.force,
+    )
+    if result["action"] == "unchanged":
+        print(f"{result['name']}: already published at {result['path']} (nothing to do)")
+        return 0
+    print(f"{result['action']} {result['name']}: {result['path']}")
+    for warning in result["warnings"]:
+        print(f"warning: {warning}")
+    if result["committed"]:
+        print("committed" + (" and pushed" if result["pushed"] else ""))
+    else:
+        print("next: review the change and commit, or re-run with --commit [--push]")
+    return 0
+
+
 def cmd_status(args, home: Path) -> int:
     cfg = load_config(home)
     candidates = list_candidates(home)
@@ -885,6 +919,7 @@ def dispatch(args, home: Path) -> int:
         "doctor": cmd_doctor,
         "schedule": cmd_schedule,
         "sync": cmd_sync,
+        "publish": cmd_publish,
         "status": cmd_status,
         "selftest": cmd_selftest,
     }
