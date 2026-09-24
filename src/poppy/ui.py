@@ -9,6 +9,7 @@ cannot act on the library.
 from __future__ import annotations
 
 import base64
+import errno
 import hmac
 import json
 import threading
@@ -266,10 +267,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         if self.path in ("/", "/index.html"):
-            if not INDEX_HTML.is_file():
-                self._json({"error": "ui/index.html missing"}, 500)
-                return
-            self._send(200, INDEX_HTML.read_bytes(), "text/html; charset=utf-8")
+            self._send(200, self.index_html, "text/html; charset=utf-8")
         elif self.path == "/api/state":
             self._json(self.backend.state() if self.backend is not None else _state(self.home, self.cfg))
         else:
@@ -325,11 +323,23 @@ def build_server(
             f"refusing to bind {bind_host} without a token — anyone who can reach the port "
             "could change the library; pass --token <secret> (or --insecure to acknowledge the risk)"
         )
-    attrs = {"home": home, "cfg": cfg, "token": token_value}
+    if not INDEX_HTML.is_file():
+        raise PoppyError(f"the UI page is missing from this install ({INDEX_HTML}) — reinstall Poppy")
+    # Read the page once: a running server must survive its install directory
+    # being replaced (for example a package-manager upgrade).
+    attrs = {"home": home, "cfg": cfg, "token": token_value, "index_html": INDEX_HTML.read_bytes()}
     if demo:
         attrs["backend"] = DemoBackend()
     handler = type("PoppyHandler", (Handler,), attrs)
-    server = ThreadingHTTPServer((bind_host, bind_port), handler)
+    try:
+        server = ThreadingHTTPServer((bind_host, bind_port), handler)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            raise PoppyError(
+                f"port {bind_port} is already in use — another `poppy ui` may be running; "
+                "stop it or pass `poppy ui --port <other>`"
+            ) from exc
+        raise PoppyError(f"cannot bind {bind_host}:{bind_port}: {exc}") from exc
     server.token = token_value  # type: ignore[attr-defined]
     return server
 

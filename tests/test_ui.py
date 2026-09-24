@@ -69,6 +69,29 @@ class TestUiServer(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("<html", body.lower())
 
+    def test_page_is_loaded_once_and_survives_file_removal(self):
+        page = Path(self.tmp.name) / "index.html"
+        page.write_text("<!doctype html><html>cached page</html>", encoding="utf-8")
+        with mock.patch.object(ui, "INDEX_HTML", page):
+            server = self.start()
+            page.unlink()  # as after a package upgrade replaces the install directory
+            status, body = self.request(server, "/")
+        self.assertEqual(status, 200)
+        self.assertIn("cached page", body)
+
+    def test_missing_page_fails_before_binding(self):
+        with mock.patch.object(ui, "INDEX_HTML", Path(self.tmp.name) / "nope.html"):
+            with self.assertRaises(PoppyError) as caught:
+                ui.build_server(self.home, self.cfg, host="127.0.0.1", port=0)
+        self.assertIn("missing", str(caught.exception))
+
+    def test_port_in_use_reports_clearly(self):
+        server = self.start()
+        port = server.server_address[1]
+        with self.assertRaises(PoppyError) as caught:
+            ui.build_server(self.home, self.cfg, host="127.0.0.1", port=port)
+        self.assertIn("already in use", str(caught.exception))
+
     def test_non_loopback_requires_token(self):
         with self.assertRaises(PoppyError):
             ui.build_server(self.home, self.cfg, host="0.0.0.0", port=0)
