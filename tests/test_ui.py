@@ -131,6 +131,42 @@ class TestUiServer(unittest.TestCase):
         fields = {field["key"]: field for field in json.loads(body)["config"]["fields"]}
         self.assertEqual(fields["decay_after_days"]["value"], 30)
 
+    def test_doctor_and_mine_actions(self):
+        server = self.start(token="secret")
+        headers = {**self.basic("secret"), "Content-Type": "application/json"}
+        status, body = self.request(
+            server,
+            "/api/action",
+            method="POST",
+            headers=headers,
+            body=json.dumps({"action": "doctor"}).encode("utf-8"),
+        )
+        self.assertEqual(status, 200)
+        checks = json.loads(body)["checks"]
+        self.assertTrue(any(check["name"] == "python" for check in checks))
+        self.assertTrue(all({"name", "status", "detail"} <= set(check) for check in checks))
+
+        # a manual mining run starts; with no miner configured it fails cleanly
+        status, body = self.request(
+            server,
+            "/api/action",
+            method="POST",
+            headers=headers,
+            body=json.dumps({"action": "mine"}).encode("utf-8"),
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["running"])
+        mining = {"running": True}
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            status, body = self.request(server, "/api/state", headers=self.basic("secret"))
+            mining = json.loads(body)["mining"]
+            if not mining.get("running"):
+                break
+            time.sleep(0.1)
+        self.assertFalse(mining.get("running"))
+        self.assertTrue(mining.get("error"))
+
     def test_api_state_and_action(self):
         entry = library.create_fact_entry(self.home, CANDIDATE)
         server = self.start(token="secret")
@@ -291,6 +327,25 @@ class TestUiDemo(unittest.TestCase):
         self.assertIn("at least 1", json.loads(caught.exception.read())["error"])
         fields = {field["key"]: field for field in self.state()["config"]["fields"]}
         self.assertEqual(fields["decay_after_days"]["value"], 45)
+
+    def test_doctor_action_lists_checks(self):
+        names = [check["name"] for check in self.act("doctor")["checks"]]
+        self.assertIn("python", names)
+        self.assertNotIn("agent.miner.test", names)
+        names = [check["name"] for check in self.act("doctor", agent=True)["checks"]]
+        self.assertIn("agent.miner.test", names)
+
+    def test_mine_runs_once_at_a_time_and_adds_a_candidate(self):
+        with mock.patch.object(demo, "MINE_DELAY", 0.05):
+            self.assertTrue(self.act("mine")["running"])
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.act("mine")
+            self.assertEqual(caught.exception.code, 400)
+            time.sleep(0.3)
+        state = self.state()
+        self.assertFalse(state["mining"]["running"])
+        self.assertEqual(state["mining"]["accepted"], 1)
+        self.assertIn("skill-quiet-cron", [c["id"] for c in state["candidates"]])
 
     def test_demo_never_writes_to_the_home(self):
         before = sorted(str(path) for path in self.home.rglob("*"))

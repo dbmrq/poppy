@@ -53,6 +53,25 @@ def _slug(text: str, limit: int = 42) -> str:
 def _evidence(source: str, session: str, quote: str) -> dict:
     return {"source": source, "session": session, "quote": quote}
 
+MINE_DELAY = 4.0  # seconds the demo miner pretends to work
+
+DEMO_MINE_CANDIDATE = {
+    "id": "skill-quiet-cron",
+    "kind": "skill",
+    "status": "pending",
+    "title": "Keep scheduled jobs silent unless something breaks",
+    "trigger": "when adding or reviewing a scheduled job",
+    "summary": (
+        "A successful job should print nothing; noise only when it fails, so logs and "
+        "emails stay meaningful."
+    ),
+    "evidence": [
+        _evidence("opencode", "ses-6a12f0d9", "the cron job mails me every day just to say it ran"),
+        _evidence("opencode", "ses-6a12f0d9", "quiet by default, noisy only when it fails"),
+    ],
+    "created_at": _ts(),
+}
+
 
 DRAFT_TAP_CHECK = """\
 ---
@@ -559,6 +578,7 @@ class DemoBackend:
         self.library = _library()
         self.archived = _archived()
         self.config = copy.deepcopy(DEMO_CONFIG)
+        self.mining: dict = {}
 
     # -- state -----------------------------------------------------------------
     def _settle_writer(self) -> None:
@@ -593,6 +613,7 @@ class DemoBackend:
                     "fields": settings.fields(self.config),
                     "ui_address": "127.0.0.1:8788  (demo)",
                 },
+                "mining": dict(self.mining),
             }
 
     # -- actions ---------------------------------------------------------------
@@ -649,6 +670,28 @@ class DemoBackend:
             if action == "entry_verify":
                 self._entry(str(payload.get("id", "")))["last_verified"] = _ts()
                 return {"ok": True}
+            if action == "doctor":
+                checks = [
+                    {"name": "python", "status": "ok", "detail": "3.13.5"},
+                    {"name": "install", "status": "ok", "detail": "pipx install · poppy 0.1.0 (demo)"},
+                    {"name": "sources", "status": "ok", "detail": "1 source(s)"},
+                    {"name": "agent.miner", "status": "ok", "detail": "configured"},
+                    {"name": "agent.writer", "status": "ok", "detail": "configured"},
+                    {"name": "schedule", "status": "warn", "detail": "not installed (demo)"},
+                    {"name": "sync", "status": "warn", "detail": "not initialized (demo)"},
+                ]
+                if payload.get("agent"):
+                    checks.insert(3, {"name": "agent.miner.test", "status": "ok", "detail": "ok (demo)"})
+                    checks.insert(4, {"name": "agent.writer.test", "status": "ok", "detail": "ok (demo)"})
+                return {"ok": True, "checks": checks}
+            if action == "mine":
+                if self.mining.get("running"):
+                    raise PoppyError("a mining run is already in progress")
+                self.mining = {"running": True, "started_at": _ts()}
+                timer = threading.Timer(MINE_DELAY, self._finish_mine)
+                timer.daemon = True
+                timer.start()
+                return {"ok": True, "running": True}
             if action == "config_set":
                 normalized = settings.validate(payload.get("values"), check_binaries=False)
                 settings.apply(self.config, normalized)
@@ -712,6 +755,23 @@ class DemoBackend:
         timer.daemon = True
         timer.start()
         return {"ok": True, "status": "writing"}
+
+    def _finish_mine(self) -> None:
+        with self._lock:
+            candidate = copy.deepcopy(DEMO_MINE_CANDIDATE)
+            candidate["created_at"] = _ts()
+            self.candidates.append(candidate)
+            self.mining = {
+                "running": False,
+                "started_at": self.mining.get("started_at"),
+                "finished_at": _ts(),
+                "sessions": 37,
+                "accepted": 1,
+                "invalid": 0,
+                "decay": 0,
+                "agent_exit": 0,
+                "error": None,
+            }
 
     def _finish_draft(self, candidate_id: str) -> None:
         with self._lock:

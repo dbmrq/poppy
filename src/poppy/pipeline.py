@@ -97,6 +97,22 @@ def mine(
     quiet: bool = False,
     config: dict | None = None,
 ) -> dict:
+    """Run one mining pass. Only one may run at a time (UI, CLI, or timer)."""
+    ensure_home_layout(home)
+    lock = acquire_lock(home, "mine")
+    try:
+        return _mine(home, since_seconds=since_seconds, dry_run=dry_run, quiet=quiet, config=config)
+    finally:
+        release_lock(lock)
+
+
+def _mine(
+    home: Path,
+    since_seconds: float | None = None,
+    dry_run: bool = False,
+    quiet: bool = False,
+    config: dict | None = None,
+) -> dict:
     ensure_home_layout(home)
     cfg = config or load_config(home)
     sources = load_sources(home)

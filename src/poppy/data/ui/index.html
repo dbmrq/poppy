@@ -114,12 +114,19 @@
     padding: 14px 17px; margin: 16px 0 4px;
   }
   .settings h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .settings h3:not(:first-child) { margin-top: 18px; }
   .settings .field { margin-bottom: 12px; }
   .settings .field label { display: block; font-weight: 600; font-size: 13.5px; margin-bottom: 4px; }
   .settings .field input, .settings .field textarea { width: 100%; }
   .settings .help { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
   .settings .meta-row { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; }
+  .settings .meta-row.err { color: var(--danger); }
   .settings .note.ok { color: var(--ok); }
+  .checks { list-style: none; margin: 10px 0 0; padding: 0; font-size: 13.5px; }
+  .checks li { margin: 4px 0; color: var(--muted); }
+  .checks li.ok { color: var(--ok); }
+  .checks li.warn { color: var(--warn); }
+  .checks li.fail { color: var(--danger); }
   @media (max-width: 560px) {
     .legend dl { grid-template-columns: 1fr; gap: 2px; }
     .legend dd { margin-bottom: 6px; }
@@ -145,7 +152,20 @@
   <div class="header-tools">
     <span class="status" id="status" hidden></span>
     <button id="settings-toggle" class="icon" aria-expanded="false" aria-label="Settings" title="Settings">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.8v3.1M12 18.1v3.1M2.8 12h3.1M18.1 12h3.1M5.5 5.5l2.2 2.2M16.3 16.3l2.2 2.2M18.5 5.5l-2.2 2.2M7.7 16.3l-2.2 2.2"/></svg>
+      <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+        <circle cx="12" cy="12" r="6.9" fill="none" stroke="currentColor" stroke-width="2.2"/>
+        <g fill="currentColor">
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2"/>
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2" transform="rotate(45 12 12)"/>
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2" transform="rotate(90 12 12)"/>
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2" transform="rotate(135 12 12)"/>
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2" transform="rotate(180 12 12)"/>
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2" transform="rotate(225 12 12)"/>
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2" transform="rotate(270 12 12)"/>
+          <rect x="10.8" y="0.7" width="2.4" height="4.4" rx="1.2" transform="rotate(315 12 12)"/>
+        </g>
+        <circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/>
+      </svg>
     </button>
     <button id="legend-toggle" class="icon" aria-expanded="false" aria-label="About these options" title="About these options">
       <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true"><circle cx="8" cy="8" r="6.9" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="4.6" r="1.15" fill="currentColor"/><rect x="7.1" y="6.7" width="1.8" height="5" rx=".9" fill="currentColor"/></svg>
@@ -185,6 +205,14 @@
       <span class="note" id="settings-status"></span>
     </div>
     <p class="meta-row" id="settings-path"></p>
+    <h3>Actions</h3>
+    <div class="actions">
+      <button id="doctor-run">Run doctor</button>
+      <button id="doctor-agent" title="Runs the configured agent commands with a trivial prompt; can take a while">Test agent commands</button>
+      <button id="mine-run">Trigger miner</button>
+    </div>
+    <ul class="checks" id="doctor-output" hidden></ul>
+    <p class="meta-row" id="mine-status"></p>
   </section>
   <section>
     <h2>Queue <span class="count" id="queue-count"></span></h2>
@@ -241,8 +269,8 @@ function badge(text, extraClass = "") {
   return el("span", { class: `badge ${extraClass}`, text });
 }
 
-function elapsedClock(candidate) {
-  const started = Date.parse(candidate.writing_started_at || "");
+function elapsedSince(iso) {
+  const started = Date.parse(iso || "");
   if (!Number.isFinite(started)) return "";
   const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
   const mm = Math.floor(seconds / 60);
@@ -384,7 +412,7 @@ function candidateCard(candidate) {
   if (status === "writing") {
     actions.append(el("span", { class: "meta" }, [
       el("span", { class: "spin" }),
-      el("span", { text: `writer agent running…${elapsedClock(candidate)}` }),
+      el("span", { text: `writer agent running…${elapsedSince(candidate.writing_started_at)}` }),
     ]));
     children.push(actions);
     return el("article", { class: "card" }, children);
@@ -479,6 +507,74 @@ function render(state) {
   $("#path-home").textContent = state.home;
   $("#path-skills").textContent = dirs || "none configured";
   renderSettings(state.config);
+  renderMining(state.mining);
+}
+
+function renderMining(mining) {
+  const node = $("#mine-status");
+  const button = $("#mine-run");
+  const running = !!(mining && mining.running);
+  button.disabled = running;
+  node.className = "meta-row";
+  if (running) {
+    node.textContent = `mining…${elapsedSince(mining.started_at)}`;
+  } else if (mining && mining.error) {
+    node.textContent = `last mining run failed: ${mining.error}`;
+    node.className = "meta-row err";
+  } else if (mining && mining.finished_at) {
+    node.textContent =
+      `last mining run: ${mining.sessions} session(s) · ${mining.accepted} candidate(s) · ` +
+      `${mining.invalid} invalid · ${mining.decay} decayed`;
+  } else {
+    node.textContent = "";
+  }
+}
+
+const CHECK_ICON = { ok: "✓", warn: "⚠", fail: "✗" };
+
+async function runDoctor(withAgent) {
+  const output = $("#doctor-output");
+  const buttons = [$("#doctor-run"), $("#doctor-agent")];
+  buttons.forEach((button) => { button.disabled = true; });
+  output.hidden = false;
+  output.replaceChildren(el("li", { text: "running…" }));
+  try {
+    const response = await fetch("/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "doctor", agent: withAgent }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) {
+      output.replaceChildren(el("li", { class: "fail", text: `✗ ${data.error || `request failed (${response.status})`}` }));
+      return;
+    }
+    output.replaceChildren(...(data.checks || []).map((check) =>
+      el("li", {
+        class: check.status,
+        text: `${CHECK_ICON[check.status] || check.status} ${check.name}${check.detail ? ` — ${check.detail}` : ""}`,
+      })
+    ));
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+async function triggerMine() {
+  const response = await fetch("/api/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "mine" }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    const node = $("#mine-status");
+    node.className = "meta-row err";
+    node.textContent = data.error || `request failed (${response.status})`;
+    return;
+  }
+  await refresh();
+  schedulePoll(500);
 }
 
 const settingsFields = new Map();
@@ -547,24 +643,15 @@ async function saveSettings() {
   await refresh();
 }
 
+const legend = $("#legend");
+const legendToggle = $("#legend-toggle");
 const settingsPanel = $("#settings");
 const settingsToggle = $("#settings-toggle");
-try {
-  if (localStorage.getItem("poppy.settings") === "open") settingsPanel.hidden = false;
-} catch (error) {
-  /* private mode: just don't remember */
-}
-settingsToggle.setAttribute("aria-expanded", String(!settingsPanel.hidden));
-settingsToggle.addEventListener("click", () => {
-  settingsPanel.hidden = !settingsPanel.hidden;
-  settingsToggle.setAttribute("aria-expanded", String(!settingsPanel.hidden));
-  try {
-    localStorage.setItem("poppy.settings", settingsPanel.hidden ? "closed" : "open");
-  } catch (error) {
-    /* private mode: just don't remember */
-  }
-});
+
 $("#settings-save").addEventListener("click", saveSettings);
+$("#doctor-run").addEventListener("click", () => runDoctor(false));
+$("#doctor-agent").addEventListener("click", () => runDoctor(true));
+$("#mine-run").addEventListener("click", triggerMine);
 settingsPanel.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) saveSettings();
 });
@@ -585,8 +672,9 @@ async function refresh() {
 
 async function tick() {
   const state = await refresh();
-  const pending = ((state && state.candidates) || []).some((candidate) => candidate.status === "writing");
-  schedulePoll(pending ? POLL_WRITING_MS : POLL_IDLE_MS);
+  const writing = ((state && state.candidates) || []).some((candidate) => candidate.status === "writing");
+  const mining = !!(state && state.mining && state.mining.running);
+  schedulePoll(writing || mining ? POLL_WRITING_MS : POLL_IDLE_MS);
 }
 
 let pollTimer = null;
@@ -596,25 +684,52 @@ function schedulePoll(delay) {
   pollTimer = setTimeout(tick, delay);
 }
 
-const legend = $("#legend");
-const legendToggle = $("#legend-toggle");
+const PANELS = { legend: [legend, legendToggle], settings: [settingsPanel, settingsToggle] };
+
+function applyPanel(name, open) {
+  const [panel, toggle] = PANELS[name];
+  panel.hidden = !open;
+  toggle.setAttribute("aria-expanded", String(open));
+}
+
+function showPanel(name) {  // opening one closes the other, and remembers both
+  for (const key of Object.keys(PANELS)) {
+    applyPanel(key, key === name);
+    try {
+      localStorage.setItem(`poppy.${key}`, key === name ? "open" : "closed");
+    } catch (error) {
+      /* private mode: just don't remember */
+    }
+  }
+}
+
+function togglePanel(name) {
+  if (!PANELS[name][0].hidden) {
+    applyPanel(name, false);
+    try {
+      localStorage.setItem(`poppy.${name}`, "closed");
+    } catch (error) {
+      /* private mode: just don't remember */
+    }
+    return;
+  }
+  showPanel(name);
+}
+
 try {
   const seen = localStorage.getItem("poppy.legend.seen");
-  legend.hidden = seen ? localStorage.getItem("poppy.legend") !== "open" : false;
+  let legendOpen = seen ? localStorage.getItem("poppy.legend") === "open" : true;
+  let settingsOpen = localStorage.getItem("poppy.settings") === "open";
   if (!seen) localStorage.setItem("poppy.legend.seen", "1");
+  if (legendOpen && settingsOpen) settingsOpen = false;  // never both at once
+  applyPanel("legend", legendOpen);
+  applyPanel("settings", settingsOpen);
 } catch (error) {
-  legend.hidden = false;
+  applyPanel("legend", false);
+  applyPanel("settings", false);
 }
-legendToggle.setAttribute("aria-expanded", String(!legend.hidden));
-legendToggle.addEventListener("click", () => {
-  legend.hidden = !legend.hidden;
-  legendToggle.setAttribute("aria-expanded", String(!legend.hidden));
-  try {
-    localStorage.setItem("poppy.legend", legend.hidden ? "closed" : "open");
-  } catch (error) {
-    /* private mode: just don't remember */
-  }
-});
+legendToggle.addEventListener("click", () => togglePanel("legend"));
+settingsToggle.addEventListener("click", () => togglePanel("settings"));
 
 const POLL_IDLE_MS = 5000;
 const POLL_WRITING_MS = 1000;
