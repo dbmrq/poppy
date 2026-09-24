@@ -31,6 +31,8 @@ Paste this into your agent:
 
 Or paste the contents of [`install/PROMPT.md`](install/PROMPT.md) directly.
 
+Prefer Homebrew? `brew tap dbmrq/tap && brew install poppy-ai` installs the CLI; run the installer prompt afterwards to configure sources and schedules.
+
 The agent installs the `poppy-ai` package with pipx (or pip) — from PyPI when the release is published, from git otherwise; `poppy update` keeps it current whichever way it was installed (`poppy update --check` reports first). The agent also finds its own transcript store — there is no per-harness integration and no support matrix — and verifies it against real sessions before going further. Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
 
 ## Requirements

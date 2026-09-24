@@ -15,6 +15,8 @@ pipx install poppy-ai
 pipx install git+https://github.com/dbmrq/poppy.git
 ```
 
+On macOS, if the user prefers Homebrew: `brew tap dbmrq/tap && brew install poppy-ai`.
+
 If pipx is unavailable, use `python3 -m pip install --user poppy-ai` (or the same command with the git URL above, or `pip install` inside a virtualenv). If neither works — no pip, or an externally-managed Python — fall back to a checkout:
 
 ```bash

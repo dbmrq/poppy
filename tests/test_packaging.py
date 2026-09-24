@@ -33,6 +33,21 @@ class TestPackaging(unittest.TestCase):
     def test_install_mode_in_a_checkout(self):
         self.assertEqual(update.install_mode(), "checkout")
 
+    def test_install_mode_detects_brew(self):
+        brew_path = Path("/opt/homebrew/Cellar/poppy-ai/0.1.0/lib/python3.13/site-packages/poppy")
+        with mock.patch.object(update, "PACKAGE_DIR", brew_path):
+            self.assertEqual(update.install_mode(), "brew")
+
+    def test_brew_update_command(self):
+        with mock.patch.object(update, "install_mode", return_value="brew"), mock.patch.object(
+            update, "_run", return_value=(0, "ok")
+        ), mock.patch.object(update, "_refresh", return_value=(True, "")), mock.patch.object(
+            update, "version", return_value="poppy 9.9.9"
+        ):
+            result = update.update(self.home, {})
+        self.assertEqual(result["mode"], "brew")
+        self.assertEqual(result["command"], "brew upgrade poppy-ai")
+
 
 class TestUpdate(unittest.TestCase):
     def setUp(self):

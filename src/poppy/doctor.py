@@ -32,7 +32,12 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
         Check("python", "ok" if sys.version_info >= (3, 10) else "fail", sys.version.split()[0])
     )
     mode = install_mode()
-    label = {"pipx": "pipx install", "checkout": "source checkout", "pip": "pip install"}[mode]
+    label = {
+        "pipx": "pipx install",
+        "brew": "Homebrew",
+        "checkout": "source checkout",
+        "pip": "pip install",
+    }[mode]
     checks.append(Check("install", "ok", f"{label} · poppy {__version__}"))
 
     if not config_path(home).exists():

@@ -25,9 +25,12 @@ PYPI_URL = f"https://pypi.org/pypi/{DIST_NAME}/json"
 
 
 def install_mode() -> str:
-    """One of: pipx, checkout, pip."""
-    if "pipx" in str(Path(PACKAGE_DIR)):
+    """One of: pipx, brew, checkout, pip."""
+    package_path = str(PACKAGE_DIR)
+    if "pipx" in package_path:
         return "pipx"
+    if "/Cellar/" in package_path or "/homebrew/" in package_path:
+        return "brew"
     if (REPO_ROOT / "bin" / "poppy").is_file() and (REPO_ROOT / ".git").is_dir():
         return "checkout"
     return "pip"
@@ -148,11 +151,13 @@ def update(home: Path, cfg: dict) -> dict:
     mode = install_mode()
     if mode == "pipx":
         command = ["pipx", "upgrade", DIST_NAME]
+    elif mode == "brew":
+        command = ["brew", "upgrade", DIST_NAME]
     elif mode == "checkout":
         command = ["git", "-C", str(REPO_ROOT), "pull", "--rebase", "--autostash"]
     else:
         raise PoppyError(
-            "this install is not managed by pipx or a git checkout — update it with your "
+            "this install is not managed by pipx, Homebrew, or a git checkout — update it with your "
             "package manager, for example: python3 -m pip install --upgrade "
             "git+https://github.com/dbmrq/poppy.git"
         )

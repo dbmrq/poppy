@@ -33,6 +33,8 @@ def _cli_hint() -> dict:
     hint: dict = {"path": str(REPO_ROOT if mode == "checkout" else PACKAGE_DIR), "command": None}
     if mode == "pipx":
         hint["command"] = "pipx uninstall poppy-ai"
+    elif mode == "brew":
+        hint["command"] = "brew uninstall poppy-ai"
     elif mode == "checkout":
         hint["command"] = (
             f"rm -rf {REPO_ROOT}  # and remove the poppy symlink from your PATH "

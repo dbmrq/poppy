@@ -10,7 +10,9 @@ script is `poppy`. Releases are tag-driven.
    - Owner: `dbmrq`, repository: `poppy`, workflow: `release.yml`, environment: `pypi`.
 2. **GitHub environment.** In the repo settings, create an environment named
    `pypi` (no secrets needed — the workflow authenticates with OIDC).
-3. **Homebrew tap (optional).** Create a repository named `dbmrq/homebrew-poppy`.
+3. **Homebrew tap.** Already set up: the formula lives in the existing
+   [`dbmrq/homebrew-tap`](https://github.com/dbmrq/homebrew-tap) tap at
+   `Formula/poppy-ai.rb`.
 
 ## Cutting a release
 
@@ -35,14 +37,24 @@ The `release` workflow then:
 
 ## Homebrew
 
-Copy the rendered `poppy-ai.rb` from the GitHub release into the root of the
-`dbmrq/homebrew-poppy` tap and commit. Users install with:
+The formula lives in the [`dbmrq/homebrew-tap`](https://github.com/dbmrq/homebrew-tap)
+tap. After a release, update it from the release artifacts:
 
 ```bash
-brew tap dbmrq/poppy && brew install poppy-ai
+cd <tap checkout>
+gh release download vX.Y.Z --repo dbmrq/poppy --pattern poppy-ai.rb --dir /tmp --clobber
+cp /tmp/poppy-ai.rb Formula/poppy-ai.rb
+git commit -am "Update poppy-ai to vX.Y.Z" && git push
 ```
 
-`pipx install poppy-ai` remains the recommended path.
+Users install with:
+
+```bash
+brew tap dbmrq/tap && brew install poppy-ai
+```
+
+Bump the template's `depends_on "python@X.Y"` as Homebrew's default Python
+moves. `pipx install poppy-ai` remains the recommended path.
 
 ## If a release fails part-way
 
