@@ -109,6 +109,17 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px;
   }
+  .settings {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 17px; margin: 16px 0 4px;
+  }
+  .settings h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .settings .field { margin-bottom: 12px; }
+  .settings .field label { display: block; font-weight: 600; font-size: 13.5px; margin-bottom: 4px; }
+  .settings .field input, .settings .field textarea { width: 100%; }
+  .settings .help { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
+  .settings .meta-row { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; }
+  .settings .note.ok { color: var(--ok); }
   @media (max-width: 560px) {
     .legend dl { grid-template-columns: 1fr; gap: 2px; }
     .legend dd { margin-bottom: 6px; }
@@ -133,6 +144,9 @@
   <div class="brand"><span class="dot"></span>poppy</div>
   <div class="header-tools">
     <span class="status" id="status" hidden></span>
+    <button id="settings-toggle" class="icon" aria-expanded="false" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><path d="M12 2.8v3.1M12 18.1v3.1M2.8 12h3.1M18.1 12h3.1M5.5 5.5l2.2 2.2M16.3 16.3l2.2 2.2M18.5 5.5l-2.2 2.2M7.7 16.3l-2.2 2.2"/></svg>
+    </button>
     <button id="legend-toggle" class="icon" aria-expanded="false" aria-label="About these options" title="About these options">
       <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true"><circle cx="8" cy="8" r="6.9" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="4.6" r="1.15" fill="currentColor"/><rect x="7.1" y="6.7" width="1.8" height="5" rx=".9" fill="currentColor"/></svg>
     </button>
@@ -163,6 +177,15 @@
     </dl>
   </section>
   <div class="demo" id="demo" hidden>Demo mode — mock data; actions do not touch your library.</div>
+  <section class="settings" id="settings" hidden>
+    <h3>Settings</h3>
+    <div id="settings-fields"></div>
+    <div class="actions">
+      <button class="primary" id="settings-save">Save changes</button>
+      <span class="note" id="settings-status"></span>
+    </div>
+    <p class="meta-row" id="settings-path"></p>
+  </section>
   <section>
     <h2>Queue <span class="count" id="queue-count"></span></h2>
     <div id="queue"></div>
@@ -211,6 +234,7 @@ async function act(action, payload) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.error) alert(data.error || `request failed (${response.status})`);
   await refresh();
+  schedulePoll(500);  // pick up the new state (writing, draft, ...) without waiting out the idle interval
 }
 
 function badge(text, extraClass = "") {
@@ -454,7 +478,96 @@ function render(state) {
   const dirs = (state.skills_dirs || []).map((d) => typeof d === "string" ? d : d.path).join(", ");
   $("#path-home").textContent = state.home;
   $("#path-skills").textContent = dirs || "none configured";
+  renderSettings(state.config);
 }
+
+const settingsFields = new Map();
+let settingsSignature = null;
+
+function settingsDirty() {
+  for (const state of settingsFields.values()) {
+    if (state.input.value !== state.initial) return true;
+  }
+  return false;
+}
+
+function setSettingsStatus(text, kind) {
+  const node = $("#settings-status");
+  node.textContent = text;
+  node.className = `note ${kind || ""}`;
+}
+
+function renderSettings(config) {
+  if (!config) return;
+  $("#settings-path").textContent = `config file: ${config.path || "?"} · ui: ${config.ui_address || "?"}`;
+  const fields = config.fields || [];
+  const signature = JSON.stringify(fields);
+  if (signature === settingsSignature || settingsDirty()) return;  // never clobber edits
+  settingsSignature = signature;
+  settingsFields.clear();
+  const root = $("#settings-fields");
+  root.replaceChildren();
+  for (const field of fields) {
+    const input = field.kind === "number"
+      ? el("input", { type: "number", value: String(field.value ?? "") })
+      : el("textarea", { rows: String(Math.min(6, Math.max(2, String(field.value || "").split("\n").length))) });
+    if (field.kind !== "number") input.value = field.value || "";
+    input.addEventListener("input", () => setSettingsStatus("", ""));
+    settingsFields.set(field.key, { input, initial: input.value });
+    root.append(el("div", { class: "field" }, [
+      el("label", { text: field.label }),
+      input,
+      field.help ? el("p", { class: "help", text: field.help }) : null,
+    ]));
+  }
+}
+
+async function saveSettings() {
+  const values = {};
+  for (const [key, state] of settingsFields.entries()) {
+    if (state.input.value !== state.initial) values[key] = state.input.value;
+  }
+  if (!Object.keys(values).length) {
+    setSettingsStatus("nothing changed", "");
+    return;
+  }
+  const response = await fetch("/api/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "config_set", values }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    setSettingsStatus(data.error || `request failed (${response.status})`, "err");
+    return;
+  }
+  settingsSignature = null;
+  settingsFields.clear();
+  setSettingsStatus("saved", "ok");
+  await refresh();
+}
+
+const settingsPanel = $("#settings");
+const settingsToggle = $("#settings-toggle");
+try {
+  if (localStorage.getItem("poppy.settings") === "open") settingsPanel.hidden = false;
+} catch (error) {
+  /* private mode: just don't remember */
+}
+settingsToggle.setAttribute("aria-expanded", String(!settingsPanel.hidden));
+settingsToggle.addEventListener("click", () => {
+  settingsPanel.hidden = !settingsPanel.hidden;
+  settingsToggle.setAttribute("aria-expanded", String(!settingsPanel.hidden));
+  try {
+    localStorage.setItem("poppy.settings", settingsPanel.hidden ? "closed" : "open");
+  } catch (error) {
+    /* private mode: just don't remember */
+  }
+});
+$("#settings-save").addEventListener("click", saveSettings);
+settingsPanel.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) saveSettings();
+});
 
 async function refresh() {
   try {
@@ -473,7 +586,14 @@ async function refresh() {
 async function tick() {
   const state = await refresh();
   const pending = ((state && state.candidates) || []).some((candidate) => candidate.status === "writing");
-  setTimeout(tick, pending ? POLL_WRITING_MS : POLL_IDLE_MS);
+  schedulePoll(pending ? POLL_WRITING_MS : POLL_IDLE_MS);
+}
+
+let pollTimer = null;
+
+function schedulePoll(delay) {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(tick, delay);
 }
 
 const legend = $("#legend");

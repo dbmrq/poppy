@@ -8,14 +8,32 @@ render, and actions mutate this in-memory state only.
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+from . import settings
 from .util import PoppyError
 
 DEMO_HOME = "~/.poppy  (demo — nothing is read or written)"
-DEMO_SKILLS_DIRS = ["~/.config/opencode/skills", "~/.claude/skills"]
+DEMO_CONFIG_PATH = "~/.poppy/config.json  (demo — nothing is read or written)"
+DEMO_CONFIG = {
+    "lookback_days": 14,
+    "decay_after_days": 90,
+    "skills_dirs": ["~/.config/opencode/skills", "~/.claude/skills"],
+    "agent": {
+        "miner": {
+            "cmd": ["opencode", "run", "--model", "opencode-go/deepseek-v4.1-flash", "{prompt}"],
+            "timeout_sec": 1800,
+        },
+        "writer": {
+            "cmd": ["opencode", "run", "--model", "opencode-go/glm-5.3", "{prompt}"],
+            "timeout_sec": 900,
+        },
+    },
+}
+DEMO_SKILLS_DIRS = DEMO_CONFIG["skills_dirs"]
 QUEUE_STATUSES = {"pending", "writing", "draft", "draft_invalid", "draft_failed", "writer_rejected"}
 WRITER_DELAY = 2.5  # seconds an accepted skill spends "writing"
 
@@ -540,6 +558,7 @@ class DemoBackend:
         self._initial_writing = {c["id"] for c in self.candidates if c.get("status") == "writing"}
         self.library = _library()
         self.archived = _archived()
+        self.config = copy.deepcopy(DEMO_CONFIG)
 
     # -- state -----------------------------------------------------------------
     def _settle_writer(self) -> None:
@@ -566,9 +585,14 @@ class DemoBackend:
                 "candidates": [dict(c) for c in self.candidates if c["status"] in QUEUE_STATUSES],
                 "library": grouped,
                 "archived": [dict(e) for e in self.archived],
-                "skills_dirs": DEMO_SKILLS_DIRS,
+                "skills_dirs": list(self.config.get("skills_dirs") or DEMO_SKILLS_DIRS),
                 "home": DEMO_HOME,
                 "demo": True,
+                "config": {
+                    "path": DEMO_CONFIG_PATH,
+                    "fields": settings.fields(self.config),
+                    "ui_address": "127.0.0.1:8788  (demo)",
+                },
             }
 
     # -- actions ---------------------------------------------------------------
@@ -625,6 +649,10 @@ class DemoBackend:
             if action == "entry_verify":
                 self._entry(str(payload.get("id", "")))["last_verified"] = _ts()
                 return {"ok": True}
+            if action == "config_set":
+                normalized = settings.validate(payload.get("values"), check_binaries=False)
+                settings.apply(self.config, normalized)
+                return {"ok": True, "fields": settings.fields(self.config)}
             if action == "resolve_decay":
                 candidate = self._candidate(str(payload.get("id", "")))
                 candidate["status"] = "resolved"

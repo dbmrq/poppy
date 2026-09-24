@@ -16,7 +16,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import decay, digest, library
+from . import decay, digest, library, settings
 from .candidates import (
     drafts_candidate_dir,
     list_candidates,
@@ -24,6 +24,7 @@ from .candidates import (
     mark_rejected,
     save_candidate,
 )
+from .config import config_path, save_config
 from .demo import DemoBackend
 from .pipeline import accept, discard_draft
 from .skills import archive_skill, install_draft, restore_skill
@@ -66,6 +67,11 @@ def _state(home: Path, cfg: dict) -> dict:
         "archived": archived,
         "skills_dirs": cfg.get("skills_dirs", []),
         "home": str(home),
+        "config": {
+            "path": str(config_path(home)),
+            "fields": settings.fields(cfg),
+            "ui_address": f"{cfg.get('ui', {}).get('host', '127.0.0.1')}:{cfg.get('ui', {}).get('port', 8788)}",
+        },
     }
 
 
@@ -162,6 +168,12 @@ def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
             return {"ok": True, "dirs": dirs}
         library.restore_entry(home, entry)
         return {"ok": True}
+
+    if action == "config_set":
+        normalized = settings.validate(payload.get("values"))
+        settings.apply(cfg, normalized)  # cfg is shared, so the change is live
+        save_config(home, cfg)
+        return {"ok": True, "fields": settings.fields(cfg)}
 
     raise PoppyError(f"unknown action: {action}")
 

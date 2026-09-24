@@ -94,6 +94,43 @@ class TestUiServer(unittest.TestCase):
         self.assertEqual(result, {"ok": True, "status": "writing"})
         self.assertEqual(thread.call_args.kwargs["args"][-1], "be terse")
 
+    def test_config_state_and_update(self):
+        server = self.start(token="secret")
+        status, body = self.request(server, "/api/state", headers=self.basic("secret"))
+        config = json.loads(body)["config"]
+        self.assertTrue(config["path"].endswith("config.json"))
+        keys = [field["key"] for field in config["fields"]]
+        self.assertIn("agent.miner.cmd", keys)
+
+        headers = {**self.basic("secret"), "Content-Type": "application/json"}
+        status, body = self.request(
+            server,
+            "/api/action",
+            method="POST",
+            headers=headers,
+            body=json.dumps({"action": "config_set", "values": {"decay_after_days": "30"}}).encode("utf-8"),
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)["ok"])
+        self.assertEqual(load_config(self.home)["decay_after_days"], 30)
+
+        # invalid changes are rejected and nothing is written
+        status, body = self.request(
+            server,
+            "/api/action",
+            method="POST",
+            headers=headers,
+            body=json.dumps({"action": "config_set", "values": {"decay_after_days": 0}}).encode("utf-8"),
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("at least 1", json.loads(body)["error"])
+        self.assertEqual(load_config(self.home)["decay_after_days"], 30)
+
+        # the live server config changed with the save
+        status, body = self.request(server, "/api/state", headers=self.basic("secret"))
+        fields = {field["key"]: field for field in json.loads(body)["config"]["fields"]}
+        self.assertEqual(fields["decay_after_days"]["value"], 30)
+
     def test_api_state_and_action(self):
         entry = library.create_fact_entry(self.home, CANDIDATE)
         server = self.start(token="secret")
@@ -241,6 +278,19 @@ class TestUiDemo(unittest.TestCase):
         state = self.state()
         self.assertNotIn("decay-4f2a91c3d8", [c["id"] for c in state["candidates"]])
         self.assertIn("memory-openrouter-spend", [e["id"] for e in state["archived"]])
+
+    def test_config_updates_in_memory(self):
+        fields = {field["key"]: field for field in self.state()["config"]["fields"]}
+        self.assertIn("opencode", fields["agent.miner.cmd"]["value"])
+        self.act("config_set", values={"decay_after_days": "45"})
+        fields = {field["key"]: field for field in self.state()["config"]["fields"]}
+        self.assertEqual(fields["decay_after_days"]["value"], 45)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            self.act("config_set", values={"decay_after_days": 0})
+        self.assertEqual(caught.exception.code, 400)
+        self.assertIn("at least 1", json.loads(caught.exception.read())["error"])
+        fields = {field["key"]: field for field in self.state()["config"]["fields"]}
+        self.assertEqual(fields["decay_after_days"]["value"], 45)
 
     def test_demo_never_writes_to_the_home(self):
         before = sorted(str(path) for path in self.home.rglob("*"))
