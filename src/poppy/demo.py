@@ -161,6 +161,7 @@ def _candidates() -> list[dict]:
                     "I keep adding rewrites for ports nothing listens on — scan first.",
                 ),
             ],
+            "writing_started_at": _ts(),
             "created_at": _ts(days=1),
         },
         {
@@ -676,6 +677,7 @@ class DemoBackend:
             else:
                 candidate.pop("writer_instructions", None)
         candidate["status"] = "writing"
+        candidate["writing_started_at"] = _ts()
         for key in ("error", "draft_errors", "writer_rejection"):
             candidate.pop(key, None)
         timer = threading.Timer(WRITER_DELAY, self._finish_draft, args=(candidate["id"],))

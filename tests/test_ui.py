@@ -187,6 +187,7 @@ class TestUiDemo(unittest.TestCase):
         candidate = next(c for c in self.state()["candidates"] if c["id"] == "skill-verify-backup")
         self.assertEqual(candidate["status"], "draft")
         self.assertIn("## Steps", candidate["draft_preview"])
+        self.assertIn("writing_started_at", candidate)
 
     def test_rewrite_instructions_are_stored_and_cleared(self):
         with mock.patch.object(demo, "WRITER_DELAY", 0.01):

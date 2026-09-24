@@ -90,6 +90,7 @@
   }
   textarea { resize: vertical; min-height: 40px; }
   .reject-box, .rewrite-box { display: none; margin-top: 10px; gap: 8px; }
+  .scope-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
   .reject-box.open, .rewrite-box.open { display: flex; }
   .reject-box input, .rewrite-box textarea { flex: 1; }
   .empty { color: var(--muted); font-size: 13.5px; }
@@ -216,6 +217,14 @@ function badge(text, extraClass = "") {
   return el("span", { class: `badge ${extraClass}`, text });
 }
 
+function elapsedClock(candidate) {
+  const started = Date.parse(candidate.writing_started_at || "");
+  if (!Number.isFinite(started)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  const mm = Math.floor(seconds / 60);
+  return ` ${mm}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 function evidenceBlock(candidate) {
   const items = candidate.evidence || [];
   if (!items.length) return null;
@@ -280,19 +289,23 @@ function factControls(candidate) {
   projectInput.hidden = (candidate.scope || "user") !== "project";
   scopeSelect.addEventListener("change", () => { projectInput.hidden = scopeSelect.value !== "project"; });
   const reject = rejectBox(candidate);
-  const node = el("div", { class: "actions" }, [
-    el("span", { class: "sub", text: "scope:" }),
-    scopeSelect,
-    projectInput,
-    el("button", {
-      class: "primary", text: "Accept",
-      onclick: () => act("accept", {
-        id: candidate.id,
-        scope: scopeSelect.value,
-        project: scopeSelect.value === "project" ? projectInput.value : null,
+  const node = el("div", {}, [
+    el("div", { class: "scope-row" }, [
+      el("span", { class: "sub", text: "scope:" }),
+      scopeSelect,
+      projectInput,
+    ]),
+    el("div", { class: "actions" }, [
+      el("button", {
+        class: "primary", text: "Accept",
+        onclick: () => act("accept", {
+          id: candidate.id,
+          scope: scopeSelect.value,
+          project: scopeSelect.value === "project" ? projectInput.value : null,
+        }),
       }),
-    }),
-    el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") }),
+      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") }),
+    ]),
   ]);
   return { node, reject };
 }
@@ -345,7 +358,10 @@ function candidateCard(candidate) {
     return el("article", { class: "card" }, children);
   }
   if (status === "writing") {
-    actions.append(el("span", { class: "meta" }, [el("span", { class: "spin" }), el("span", { text: "writer agent running…" })]));
+    actions.append(el("span", { class: "meta" }, [
+      el("span", { class: "spin" }),
+      el("span", { text: `writer agent running…${elapsedClock(candidate)}` }),
+    ]));
     children.push(actions);
     return el("article", { class: "card" }, children);
   }
@@ -369,7 +385,6 @@ function entryRow(entry, archived = false) {
   if (entry.pinned) sub.push("pinned");
   sub.push(`used ${entry.uses || 0}×`);
   if (entry.last_used) sub.push(`last used ${entry.last_used.slice(0, 10)}`);
-  sub.push(`verified ${(entry.last_verified || "").slice(0, 10) || "?"}`);
   const ops = el("div", { class: "ops" });
   if (archived) {
     ops.append(el("button", { text: "Restore", onclick: () => act("entry_restore", { id: entry.id }) }));
@@ -447,10 +462,18 @@ async function refresh() {
     const state = await response.json();
     $("#status").hidden = true;
     render(state);
+    return state;
   } catch (error) {
     $("#status").textContent = "connection lost — is `poppy ui` still running?";
     $("#status").hidden = false;
+    return null;
   }
+}
+
+async function tick() {
+  const state = await refresh();
+  const pending = ((state && state.candidates) || []).some((candidate) => candidate.status === "writing");
+  setTimeout(tick, pending ? POLL_WRITING_MS : POLL_IDLE_MS);
 }
 
 const legend = $("#legend");
@@ -473,8 +496,10 @@ legendToggle.addEventListener("click", () => {
   }
 });
 
-refresh();
-setInterval(refresh, 5000);
+const POLL_IDLE_MS = 5000;
+const POLL_WRITING_MS = 1000;
+
+tick();
 </script>
 </body>
 </html>
