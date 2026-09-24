@@ -403,17 +403,36 @@ def build_context(home: Path, cfg: dict, cwd: Path | None = None, mark_used: boo
 
 
 def ensure_builtin_skills(home: Path) -> list[str]:
-    """Copy builtin skills shipped with the repo into the library (idempotent)."""
-    created: list[str] = []
+    """Sync builtin skills into the library. Returns created/updated names.
+
+    Builtins ship with the repo and are refreshed by re-running `poppy init`:
+    a copy that still matches what Poppy installed is updated to the current
+    version, while a copy the user edited is left alone (recorded in
+    ``state/builtins.json``, which is machine-local).
+    """
+    changed: list[str] = []
     if not BUILTIN_DIR.is_dir():
-        return created
+        return changed
     ensure_library(home)
+    record_path = state_dir(home) / "builtins.json"
+    record = load_json(record_path, {}) or {}
     for source in sorted(BUILTIN_DIR.glob("*/SKILL.md")):
         name = source.parent.name
         destination = skills_dir(home) / name
-        if destination.exists():
+        builtin_sha = sha(source.read_text(encoding="utf-8"), 16)
+        if not destination.exists():
+            destination.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination / "SKILL.md")
+            record[name] = builtin_sha
+            changed.append(name)
             continue
-        destination.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination / "SKILL.md")
-        created.append(name)
-    return created
+        current_sha = sha((destination / "SKILL.md").read_text(encoding="utf-8"), 16)
+        recorded = record.get(name)
+        if recorded and current_sha == recorded and current_sha != builtin_sha:
+            shutil.copy2(source, destination / "SKILL.md")
+            record[name] = builtin_sha
+            changed.append(name)
+        elif not recorded:
+            record[name] = current_sha  # unknown provenance: treat as user-owned
+    save_json(record_path, record)
+    return changed

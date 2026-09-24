@@ -192,6 +192,19 @@ def mine(
     return summary
 
 
+def discard_draft(home: Path, candidate_id: str) -> dict:
+    """Drop a writer draft and return the candidate to the queue."""
+    candidate = load_candidate(home, candidate_id)
+    draft_dir = drafts_candidate_dir(home, candidate_id)
+    if draft_dir.exists():
+        shutil.rmtree(draft_dir)
+    candidate["status"] = "pending"
+    for key in ("draft_errors", "draft_warnings", "draft_name", "error", "writer_rejection"):
+        candidate.pop(key, None)
+    save_candidate(home, candidate)
+    return {"id": candidate_id, "status": "pending"}
+
+
 def accept(
     home: Path,
     candidate_id: str,

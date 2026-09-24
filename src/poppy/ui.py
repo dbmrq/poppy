@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,7 +16,7 @@ from .candidates import (
     mark_rejected,
     save_candidate,
 )
-from .pipeline import accept
+from .pipeline import accept, discard_draft
 from .skills import archive_skill, install_draft, restore_skill
 from .util import PoppyError, REPO_ROOT, tail
 
@@ -89,16 +88,7 @@ def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
         return {"ok": True}
 
     if action == "discard_draft":
-        candidate_id = str(payload.get("id", ""))
-        candidate = load_candidate(home, candidate_id)
-        draft_dir = drafts_candidate_dir(home, candidate_id)
-        if draft_dir.exists():
-            shutil.rmtree(draft_dir)
-        candidate["status"] = "pending"
-        for key in ("draft_errors", "draft_warnings", "draft_name", "error", "writer_rejection"):
-            candidate.pop(key, None)
-        save_candidate(home, candidate)
-        return {"ok": True}
+        return {"ok": True, **discard_draft(home, str(payload.get("id", "")))}
 
     if action == "install":
         candidate_id = str(payload.get("id", ""))

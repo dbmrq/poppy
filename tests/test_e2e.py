@@ -11,7 +11,7 @@ from poppy import digest, library  # noqa: E402
 from poppy.candidates import load_candidate, save_candidate  # noqa: E402
 from poppy.config import load_config, save_config  # noqa: E402
 from poppy.doctor import run_checks  # noqa: E402
-from poppy.pipeline import accept, mine  # noqa: E402
+from poppy.pipeline import accept, discard_draft, mine  # noqa: E402
 from poppy.skills import install_draft, uninstall_skill  # noqa: E402
 from poppy.sources import save_sources  # noqa: E402
 from poppy.ui import _state  # noqa: E402
@@ -148,6 +148,13 @@ class TestEndToEnd(unittest.TestCase):
         # skill: writer -> draft -> install
         result = accept(self.home, skill_id)
         self.assertEqual(result["status"], "draft")
+
+        # discarding a draft returns the candidate to pending; accepting re-runs the writer
+        discard_draft(self.home, skill_id)
+        self.assertEqual(load_candidate(self.home, skill_id)["status"], "pending")
+        result = accept(self.home, skill_id)
+        self.assertEqual(result["status"], "draft")
+
         candidate = load_candidate(self.home, skill_id)
         name, _dirs = install_draft(self.home, self.cfg, candidate)
         candidate["status"] = "installed"

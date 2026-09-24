@@ -13,6 +13,16 @@ You paste one prompt into whichever agent you use. The agent installs Poppy for 
 
 Design and roadmap: [PLAN.md](PLAN.md).
 
+## Agent-first
+
+You don't drive Poppy's CLI; your agent does. The installer puts a few skills in your skill directories, and from then on you just ask:
+
+- **`poppy`** — operate Poppy: "what's waiting for review?", "accept the cron one", "what do you know about deploys?", "sync my machines", "share this skill", "is Poppy healthy?". The skill carries the hard rule that the agent never promotes, archives, or publishes without your explicit decision.
+- **`poppy-context`** — fetch full memory entries when a headline in your context is relevant.
+- **`poppy-propose`** — capture a durable fact, rule, or procedure the moment you say "remember this"; it lands in the same review queue as mined candidates.
+
+The CLI is the API the agent uses: the actions mirror the review UI (`accept`, `reject`, `discard`, `install`, `archive`, `pin`, `publish`, …), the commands an agent drives take `--json`, and nothing is promoted automatically. `poppy ui` is still there when you want to browse yourself.
+
 ## Install
 
 Paste this into your agent:
@@ -74,6 +84,10 @@ poppy sessions list|search|read     transcript toolbox
 poppy mine [--since 14d] [--dry-run] mine recent sessions for candidates
 poppy ui                review queue + library (localhost only)
 poppy accept <id>       skill: run writer agent; memory/rule: accept into library
+poppy reject <id> [--reason "..."]
+poppy discard <id>      drop a skill draft and return the candidate to pending
+poppy propose --file <json>
+                        queue a candidate from an interactive session
 poppy install <id>      install a validated skill draft (library + mirrors)
 poppy uninstall <name>
 poppy context show|export|wire|unwire|status|verify

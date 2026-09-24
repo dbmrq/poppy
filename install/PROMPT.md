@@ -95,7 +95,7 @@ poppy config get skills_dirs
 poppy config set skills_dirs '["~/.agents/skills"]'
 ```
 
-At least one directory must be writable.
+At least one directory must be writable. Poppy ships builtin skills (`poppy`, `poppy-context`, `poppy-propose`) that teach your agent how to operate it; `poppy init` mirrors them here, so the user can ask you for Poppy tasks afterwards.
 
 ## 5. Wire the memory index
 
@@ -175,6 +175,7 @@ Summarize concisely:
 - skills directories
 - schedule state
 - how to review the queue (`poppy ui`), how to load memories (`poppy library show <ref>`, indexed in the digest)
+- that the builtin skills are installed, so the user can ask you to operate Poppy (review, library, mining, sync, publish, doctor)
 - how to share a reviewed skill (`poppy publish <name> --to <checkout of a public skills repo>`)
 - memory index wiring: where you wired it, and that `poppy context verify` passed
 - sync (if enabled): the remote, and that `poppy sync status` is clean

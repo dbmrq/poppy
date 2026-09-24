@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V4 in progress** — the publishing flow and CI landed; packaging, remote UI, and broader source coverage remain. Earlier phases (V1–V3.5) are done. This document is the persistent design and is updated as phases land.
+Status: **V4.5** — users operate Poppy through their agent: the builtin `poppy`, `poppy-context`, and `poppy-propose` skills plus an agent-complete CLI. V4 packaging, remote UI, and broader source coverage remain. Earlier phases (V1–V4.0) are done. This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -242,6 +242,12 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 - **Publishing (done).** `poppy publish <skill> --to <checkout> [--subdir …] [--commit] [--push] [--force]` exports one reviewed skill into a public skills repo: validation is re-run, a destination that differs is never overwritten without `--force`, machine-specific details (home path, hostname) produce warnings, and the target checkout can be committed/pushed for you. The private library stays the working set; the public repo is a curated subset.
 - **CI (done).** GitHub Actions runs the stdlib test suite (Python 3.10 and 3.13) on every push and pull request.
 - **Still open:** packaging (`pipx`/single-file install, Homebrew tap, a `poppy doctor` update check — see nice-to-haves), a remote review-UI option, and more sources verified by the installer.
+
+**V4.5 — agent-first interface (done).** Users operate Poppy through their agent, not the CLI; the CLI is the API the agent drives.
+
+- **Skills are the UI.** The installer mirrors builtin skills into the user's skill directories: `poppy` (router for status, review, library, mining, sync, publish, and doctor, with a hard "ask before promoting" rule), `poppy-context` (memory fetching, V2.5), and `poppy-propose` (capture mid-session). Builtins refresh by re-running `poppy init`: unmodified copies are updated, user-edited copies are left alone (`state/builtins.json`, machine-local).
+- **The CLI is complete for agents.** Review actions missing from the CLI were added (`reject`, `discard`), `candidates show` includes the draft text, and the commands an agent drives take `--json` (`mine`, `accept`, `install`, `uninstall`, `reject`, `discard`, `publish`, `status`, `schedule status`, `sync run`). Command-specific exit codes are documented in the `poppy` skill.
+- **Mid-session capture.** `poppy propose --file <candidate.json>` queues a candidate immediately: the agent supplies judgment plus verbatim quotes, Poppy locates the session, re-verifies the quotes, applies the miner's validation (secrets, dedupe), and lands it in the same queue. Promotion stays human.
 
 ### Nice-to-haves (recorded, not yet built)
 

@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -102,6 +103,45 @@ class TestLibrary(unittest.TestCase):
         context = library.build_context(self.home, {}, cwd=Path("/tmp"), mark_used=False)
         self.assertEqual(len(context["rules"]), 1)
         self.assertEqual(len(context["memories"]), 0)
+
+
+class TestBuiltins(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / "home"
+        ensure_home_layout(self.home)
+        self.builtin = Path(self.tmp.name) / "builtin"
+        self.source = self.builtin / "demo"
+        self.source.mkdir(parents=True)
+        self.write_builtin("v1")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write_builtin(self, marker: str) -> None:
+        (self.source / "SKILL.md").write_text(
+            f"---\nname: demo\ndescription: Demo skill. Use when testing.\n---\n\n{marker}\n",
+            encoding="utf-8",
+        )
+
+    def test_refresh_respects_user_edits(self):
+        with mock.patch.object(library, "BUILTIN_DIR", self.builtin):
+            self.assertEqual(library.ensure_builtin_skills(self.home), ["demo"])
+            installed = library.skills_dir(self.home) / "demo" / "SKILL.md"
+            self.assertIn("v1", installed.read_text(encoding="utf-8"))
+
+            # an unmodified copy is refreshed when the builtin changes
+            self.write_builtin("v2")
+            self.assertEqual(library.ensure_builtin_skills(self.home), ["demo"])
+            self.assertIn("v2", installed.read_text(encoding="utf-8"))
+
+            # a user-edited copy is left alone
+            installed.write_text(
+                installed.read_text(encoding="utf-8") + "\nuser edit\n", encoding="utf-8"
+            )
+            self.write_builtin("v3")
+            self.assertEqual(library.ensure_builtin_skills(self.home), [])
+            self.assertIn("user edit", installed.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

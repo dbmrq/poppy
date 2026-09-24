@@ -12,9 +12,10 @@ from . import __version__
 from . import decay as decay_mod
 from . import digest
 from . import library
+from . import propose as propose_mod
 from . import publish as publish_mod
 from . import sync as sync_mod
-from .candidates import list_candidates, load_candidate
+from .candidates import drafts_candidate_dir, list_candidates, load_candidate, mark_rejected, save_candidate
 from .config import (
     get_dotted,
     init_config,
@@ -24,7 +25,7 @@ from .config import (
     set_dotted,
 )
 from .doctor import run_checks
-from .pipeline import accept, mine
+from .pipeline import accept, discard_draft, mine
 from .sessions import collect_sessions, get_session, search_sessions
 from .skills import (
     adopt_installed,
@@ -108,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--since", help="lookback window override, e.g. 7d")
     p.add_argument("--dry-run", action="store_true", help="render the prompt without invoking the agent")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("candidates", help="inspect the candidate queue")
     csub = p.add_subparsers(dest="candidates_command", required=True)
@@ -119,12 +121,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("accept", help="run the writer agent for a candidate")
     p.add_argument("id")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("reject", help="reject a candidate (remembered so it is not re-proposed)")
+    p.add_argument("id")
+    p.add_argument("--reason", default="", help="why it was rejected")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("discard", help="discard a skill draft and return the candidate to pending")
+    p.add_argument("id")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("propose", help="queue a candidate from an interactive session (locates evidence quotes)")
+    p.add_argument("--file", required=True, help="path to a candidate JSON file")
+    p.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p = sub.add_parser("install", help="install a validated draft")
     p.add_argument("id")
+    p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("uninstall", help="remove a poppy-managed skill")
     p.add_argument("name")
+    p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("installed", help="list poppy-managed skills")
     p.add_argument("--json", action="store_true")
@@ -178,7 +196,8 @@ def build_parser() -> argparse.ArgumentParser:
     ssub = p.add_subparsers(dest="schedule_command", required=True)
     si = ssub.add_parser("install")
     si.add_argument("--dry-run", action="store_true")
-    ssub.add_parser("status")
+    ss = ssub.add_parser("status")
+    ss.add_argument("--json", action="store_true")
     ssub.add_parser("uninstall")
 
     p = sub.add_parser("sync", help="sync the library with a private git remote")
@@ -189,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
     si.add_argument("--machine", help="machine name for commits and machine-scoped entries")
     sr = ssub.add_parser("run", help="commit, pull, push, then materialize")
     sr.add_argument("--quiet", action="store_true")
+    sr.add_argument("--json", action="store_true")
     ss = ssub.add_parser("status", help="show repo, remote, and materialization state")
     ss.add_argument("--json", action="store_true")
 
@@ -199,8 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--commit", action="store_true", help="commit the change in the target repo")
     p.add_argument("--push", action="store_true", help="commit and push")
     p.add_argument("--force", action="store_true", help="overwrite a destination that differs")
+    p.add_argument("--json", action="store_true")
 
-    sub.add_parser("status", help="summary of home, queue, and schedule")
+    sub.add_parser("status", help="summary of home, queue, and schedule").add_argument(
+        "--json", action="store_true"
+    )
     sub.add_parser("selftest", help="run the bundled test suite")
     return parser
 
@@ -249,9 +272,9 @@ def cmd_init(args, home: Path) -> int:
     if not sources_path(home).exists():
         save_sources(home, [])
     library.ensure_library(home)
-    created_builtins = library.ensure_builtin_skills(home)
+    changed_builtins = library.ensure_builtin_skills(home)
     mirrored = []
-    for name in created_builtins:
+    for name in changed_builtins:
         if cfg.get("skills_dirs"):
             try:
                 install_builtin_skill(home, cfg, name)
@@ -262,9 +285,9 @@ def cmd_init(args, home: Path) -> int:
     print(f"config:     {'written' if created else 'kept'} ({home / 'config.json'})")
     print(f"sources:    {home / 'sources.json'}")
     print(f"library:    {home / 'library'}")
-    if created_builtins:
+    if changed_builtins:
         detail = f" (mirrored: {', '.join(mirrored)})" if mirrored else ""
-        print(f"builtins:   {', '.join(created_builtins)}{detail}")
+        print(f"builtins:   {', '.join(changed_builtins)}{detail}")
     if created:
         print("\nnext: configure sources and agent commands, then run `poppy doctor --agent`.")
     return 0
@@ -366,6 +389,9 @@ def cmd_sessions(args, home: Path) -> int:
 def cmd_mine(args, home: Path) -> int:
     since = parse_duration(args.since) if args.since else None
     summary = mine(home, since_seconds=since, dry_run=args.dry_run, quiet=args.quiet)
+    if args.json:
+        print(json.dumps(summary, indent=2))
+        return 0 if summary.get("agent_exit", 0) == 0 else 1
     if summary.get("dry_run"):
         print(f"dry run: {summary['sessions']} session(s) in the lookback window")
         print(f"prompt written to: {summary['prompt']}")
@@ -402,24 +428,35 @@ def cmd_candidates(args, home: Path) -> int:
                 print("(queue empty)")
         return 0
     candidate = load_candidate(home, args.id)
+    draft = drafts_candidate_dir(home, args.id) / "SKILL.md"
+    draft_text = draft.read_text(encoding="utf-8", errors="replace") if draft.is_file() else ""
     if args.json:
-        print(json.dumps(candidate, indent=2))
-    else:
-        print(f"id:      {candidate['id']}")
-        print(f"status:  {candidate.get('status')}")
-        print(f"title:   {candidate.get('title')}")
-        print(f"trigger: {candidate.get('trigger')}")
-        print(f"summary: {candidate.get('summary')}")
-        for item in candidate.get("evidence", []):
-            print(f"\n--- {item.get('source')}:{item.get('session')} ---\n{item.get('quote')}")
-        for warning in candidate.get("warnings", []):
-            print(f"warning: {warning}")
+        payload = dict(candidate)
+        if draft_text:
+            payload["draft_preview"] = draft_text
+        print(json.dumps(payload, indent=2))
+        return 0
+    print(f"id:      {candidate['id']}")
+    print(f"status:  {candidate.get('status')}")
+    print(f"title:   {candidate.get('title')}")
+    print(f"trigger: {candidate.get('trigger')}")
+    print(f"summary: {candidate.get('summary')}")
+    for item in candidate.get("evidence", []):
+        print(f"\n--- {item.get('source')}:{item.get('session')} ---\n{item.get('quote')}")
+    for warning in candidate.get("warnings", []):
+        print(f"warning: {warning}")
+    if draft_text:
+        print("\n--- draft ---\n")
+        print(draft_text)
     return 0
 
 
 def cmd_accept(args, home: Path) -> int:
     result = accept(home, args.id)
     status = result.get("status")
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0 if status in ("active", "draft", "writer_rejected") else 1
     if status == "active":
         entry = result.get("entry") or {}
         print(f"accepted {entry.get('kind', 'entry')}: {entry.get('title') or entry.get('id')} (scope: {entry.get('scope')})")
@@ -434,6 +471,51 @@ def cmd_accept(args, home: Path) -> int:
     return 1
 
 
+def cmd_reject(args, home: Path) -> int:
+    candidate = load_candidate(home, args.id)
+    if candidate.get("kind") == "decay":
+        raise PoppyError(
+            "decay proposals are resolved with `poppy decay --resolve <id> --resolution archive|keep|pin`"
+        )
+    reason = str(args.reason or "").strip() or "rejected in review"
+    mark_rejected(home, candidate, reason)
+    result = {"ok": True, "id": args.id, "title": candidate.get("title", ""), "reason": reason}
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    print(f"rejected {args.id}: {reason}")
+    return 0
+
+
+def cmd_discard(args, home: Path) -> int:
+    result = discard_draft(home, args.id)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    print(f"discarded draft for {args.id}; the candidate is pending again")
+    return 0
+
+
+def cmd_propose(args, home: Path) -> int:
+    cfg = load_config(home)
+    path = Path(args.file).expanduser()
+    if not path.is_file():
+        raise PoppyError(f"no such file: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise PoppyError(f"invalid JSON in {path}: {exc}")
+    result = propose_mod.propose(home, cfg, payload)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    print(f"queued {result['kind']}: {result['title']} ({result['id']})")
+    for warning in result["warnings"]:
+        print(f"warning: {warning}")
+    print("review: poppy ui (nothing is active until you accept it)")
+    return 0
+
+
 def cmd_install(args, home: Path) -> int:
     cfg = load_config(home)
     candidate = load_candidate(home, args.id)
@@ -441,9 +523,10 @@ def cmd_install(args, home: Path) -> int:
         raise PoppyError(f"candidate {args.id} has no validated draft (status: {candidate.get('status')})")
     name, dirs = install_draft(home, cfg, candidate)
     candidate["status"] = "installed"
-    from .candidates import save_candidate
-
     save_candidate(home, candidate)
+    if args.json:
+        print(json.dumps({"name": name, "dirs": dirs, "candidate": args.id}, indent=2))
+        return 0
     print(f"installed {name}:")
     for path in dirs:
         print(f"  {path}")
@@ -452,6 +535,9 @@ def cmd_install(args, home: Path) -> int:
 
 def cmd_uninstall(args, home: Path) -> int:
     removed = uninstall_skill(home, args.name)
+    if args.json:
+        print(json.dumps({"name": args.name, "removed": removed}, indent=2))
+        return 0
     print(f"uninstalled {args.name}:")
     for path in removed:
         print(f"  {path}")
@@ -716,6 +802,9 @@ def cmd_schedule(args, home: Path) -> int:
         return 0
     if args.schedule_command == "status":
         status = schedule_status(home, cfg)
+        if args.json:
+            print(json.dumps(status, indent=2))
+            return 0
         print(f"mining:  {'installed' if status.get('installed') else 'not installed'} ({status.get('kind')}): {status.get('detail')}")
         sync = status.get("sync") or {}
         print(f"sync:    {'installed' if sync.get('installed') else 'not installed'}: {sync.get('detail')}")
@@ -799,6 +888,9 @@ def cmd_sync(args, home: Path) -> int:
         except PoppyError as exc:
             print(f"poppy sync: {exc}", file=sys.stderr)
             return 2
+        if args.json:
+            print(json.dumps(result, indent=2))
+            return int(result.get("code", 0))
         if args.quiet:
             if result.get("code") == 2:
                 print(f"poppy sync: {result.get('remote_error') or 'conflict'}", file=sys.stderr)
@@ -825,6 +917,9 @@ def cmd_publish(args, home: Path) -> int:
         push=args.push,
         force=args.force,
     )
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
     if result["action"] == "unchanged":
         print(f"{result['name']}: already published at {result['path']} (nothing to do)")
         return 0
@@ -854,8 +949,37 @@ def cmd_status(args, home: Path) -> int:
     for entry in library_entries:
         kind_counts[entry.kind] = kind_counts.get(entry.kind, 0) + 1
     decay_pending = [c for c in candidates if c.get("kind") == "decay"]
+    sync_state = sync_mod.status(home, cfg)
+
+    data = {
+        "home": str(home),
+        "sources": [source.name for source in sources],
+        "queue": counts,
+        "library": {**kind_counts, "archived": len(archived)},
+        "decay_pending": len(decay_pending),
+        "installed": len(installed),
+        "schedule": {
+            "installed": bool(schedule.get("installed")),
+            "kind": schedule.get("kind"),
+            "detail": schedule.get("detail"),
+        },
+        "sync": {
+            "initialized": bool(sync_state.get("initialized")),
+            "remote": sync_state.get("remote"),
+            "dirty": sync_state.get("dirty"),
+            "ahead": sync_state.get("ahead"),
+            "behind": sync_state.get("behind"),
+            "last_run": sync_state.get("last_run"),
+            "last_status": sync_state.get("last_status"),
+        },
+        "skills_dirs": [str(d) for d in (cfg.get("skills_dirs") or [])],
+    }
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+
     print(f"home:      {home}")
-    print(f"sources:   {', '.join(s.name for s in sources) or '(none)'}")
+    print(f"sources:   {', '.join(data['sources']) or '(none)'}")
     print(f"queue:     " + (", ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "(empty)"))
     print(
         f"library:   {kind_counts['skill']} skill(s), {kind_counts['memory']} memory entry(ies), "
@@ -865,7 +989,6 @@ def cmd_status(args, home: Path) -> int:
         print(f"decay:     {len(decay_pending)} proposal(s) awaiting review")
     print(f"installed: {len(installed)} skill(s) mirrored")
     print(f"schedule:  {'installed' if schedule.get('installed') else 'not installed'} ({schedule.get('detail')})")
-    sync_state = sync_mod.status(home, cfg)
     if sync_state.get("initialized"):
         bits = []
         if sync_state["dirty"]:
@@ -881,7 +1004,7 @@ def cmd_status(args, home: Path) -> int:
         )
     else:
         print("sync:      not initialized (optional — `poppy sync init`)")
-    print(f"skills:    {', '.join(str(d) for d in (cfg.get('skills_dirs') or [])) or '(none configured)'}")
+    print(f"skills:    {', '.join(data['skills_dirs']) or '(none configured)'}")
     return 0
 
 
@@ -909,6 +1032,9 @@ def dispatch(args, home: Path) -> int:
         "mine": cmd_mine,
         "candidates": cmd_candidates,
         "accept": cmd_accept,
+        "reject": cmd_reject,
+        "discard": cmd_discard,
+        "propose": cmd_propose,
         "install": cmd_install,
         "uninstall": cmd_uninstall,
         "installed": cmd_installed,

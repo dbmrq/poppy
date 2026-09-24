@@ -84,6 +84,12 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
         )
         if "poppy-context" not in {entry.id for entry in entries}:
             checks.append(Check("builtin:poppy-context", "warn", "not in library — run `poppy init` to install it"))
+        if library.BUILTIN_DIR.is_dir():
+            builtin_names = [path.parent.name for path in sorted(library.BUILTIN_DIR.glob("*/SKILL.md"))]
+            present = {entry.id for entry in entries}
+            missing = [name for name in builtin_names if name not in present]
+            if missing:
+                checks.append(Check("builtins", "warn", f"missing: {', '.join(missing)} — run `poppy init`"))
     except PoppyError as exc:
         checks.append(Check("library", "fail", str(exc)))
 

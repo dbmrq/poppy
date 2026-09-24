@@ -143,6 +143,44 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn("already published", output)
 
+    @mock.patch("poppy.config.detect_skills_dirs", return_value=[])
+    def test_propose_reject_and_json_status(self, _mock_detect):
+        self.run_cli("init")
+        entry = {"name": "fixtures", "type": "files", "path": str(FIXTURES), "glob": "*.jsonl"}
+        code, _ = self.run_cli("sources", "add", "--json", json.dumps(entry))
+        self.assertEqual(code, 0)
+
+        candidate = {
+            "kind": "memory",
+            "title": "Prefers frozen lockfiles",
+            "summary": "Freezing the lockfile makes widget builds reproducible.",
+            "trigger": "when configuring builds",
+            "scope": "user",
+            "evidence": [
+                {
+                    "quote": "Always pass --frozen-lockfile to the package manager so the widget build is reproducible."
+                }
+            ],
+        }
+        path = Path(self.tmp.name) / "candidate.json"
+        path.write_text(json.dumps(candidate), encoding="utf-8")
+
+        code, output = self.run_cli("propose", "--file", str(path), "--json")
+        self.assertEqual(code, 0, output)
+        queued = json.loads(output)
+        self.assertTrue(queued["queued"])
+        self.assertEqual(queued["kind"], "memory")
+
+        code, output = self.run_cli("reject", queued["id"], "--reason", "not needed", "--json")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(json.loads(output)["reason"], "not needed")
+
+        code, output = self.run_cli("status", "--json")
+        self.assertEqual(code, 0, output)
+        status = json.loads(output)
+        self.assertIn("library", status)
+        self.assertIn("queue", status)
+
 
 if __name__ == "__main__":
     unittest.main()
