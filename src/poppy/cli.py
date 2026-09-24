@@ -14,6 +14,7 @@ from . import digest
 from . import library
 from . import propose as propose_mod
 from . import publish as publish_mod
+from . import purge as purge_mod
 from . import sync as sync_mod
 from .candidates import drafts_candidate_dir, list_candidates, load_candidate, mark_rejected, save_candidate
 from .config import (
@@ -202,10 +203,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("sync", help="sync the library with a private git remote")
     ssub = p.add_subparsers(dest="sync_command", required=True)
-    si = ssub.add_parser("init", help="initialize the repo and optionally set the remote")
+    si = ssub.add_parser("init", help="initialize the repo, sync once, and schedule automatic sync")
     si.add_argument("--remote", help="git remote URL (recommended: an empty private repo)")
     si.add_argument("--branch", help="branch name (default: main)")
     si.add_argument("--machine", help="machine name for commits and machine-scoped entries")
+    si.add_argument("--no-schedule", action="store_true", help="do not install the auto-sync timer")
     sr = ssub.add_parser("run", help="commit, pull, push, then materialize")
     sr.add_argument("--quiet", action="store_true")
     sr.add_argument("--json", action="store_true")
@@ -219,6 +221,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--commit", action="store_true", help="commit the change in the target repo")
     p.add_argument("--push", action="store_true", help="commit and push")
     p.add_argument("--force", action="store_true", help="overwrite a destination that differs")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("purge", help="remove Poppy from this machine (schedule, mirrors, wiring, data)")
+    p.add_argument("--yes", action="store_true", help="apply the removal (without it, only a plan is printed)")
+    p.add_argument("--keep-data", action="store_true", help="keep ~/.poppy (library, queue, config)")
     p.add_argument("--json", action="store_true")
 
     sub.add_parser("status", help="summary of home, queue, and schedule").add_argument(
@@ -870,17 +877,35 @@ def _print_sync_status(status: dict) -> None:
             f"{len(mirrors['not_mirrored'])} not mirrored · {len(mirrors['drifted'])} drifted · "
             f"{len(mirrors['orphaned'])} orphaned"
         )
+    sched = status.get("schedule") or {}
+    if sched.get("installed"):
+        print(f"auto:    every {sched.get('interval_min', 30)} min ({sched.get('detail') or 'scheduled'})")
+    else:
+        print(f"auto:    not scheduled ({sched.get('detail') or 'run `poppy schedule install`'})")
     print(f"machine: {status['machine']}")
 
 
 def cmd_sync(args, home: Path) -> int:
     cfg = load_config(home)
     if args.sync_command == "init":
-        result = sync_mod.init(home, cfg, remote=args.remote, branch=args.branch, machine=args.machine)
+        result = sync_mod.init(
+            home,
+            cfg,
+            remote=args.remote,
+            branch=args.branch,
+            machine=args.machine,
+            with_schedule=not args.no_schedule,
+        )
         print(f"repo:    {result['repo']} (branch {result['branch']})")
         print(f"remote:  {result['remote'] or '(none — local only; add one with `poppy sync init --remote <url>`)'}")
         _print_sync_run(result)
-        print("next:    `poppy schedule install` enables automatic sync")
+        sched = result.get("schedule") or {}
+        if sched.get("skipped"):
+            print("auto:    not scheduled (--no-schedule)")
+        elif sched.get("installed"):
+            print(f"auto:    every {sched.get('interval_min', 30)} min ({sched.get('kind')})")
+        elif sched.get("error"):
+            print(f"auto:    not scheduled — {sched['error']}")
         return 2 if int(result.get("code", 0)) == 2 else 0
     if args.sync_command == "run":
         try:
@@ -930,6 +955,39 @@ def cmd_publish(args, home: Path) -> int:
         print("committed" + (" and pushed" if result["pushed"] else ""))
     else:
         print("next: review the change and commit, or re-run with --commit [--push]")
+    return 0
+
+
+def cmd_purge(args, home: Path) -> int:
+    cfg = load_config(home)
+    result = purge_mod.purge(home, cfg, yes=args.yes, keep_data=args.keep_data)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    if not result.get("applied"):
+        print("poppy purge would remove:")
+        print(f"  schedule: {result['schedule']}")
+        mirrors = result.get("mirrors") or []
+        print(f"  mirrors:  {len(mirrors)} skill(s)" + (f": {', '.join(mirrors)}" if mirrors else ""))
+        wiring = result.get("wiring") or []
+        print(f"  wiring:   {', '.join(wiring) if wiring else '(none)'}")
+        print(f"  data:     {result['data']} (library, queue, config)")
+        print("nothing was removed; re-run with --yes to proceed (add --keep-data to keep the library)")
+        return 0
+    removed = result["removed"]
+    print("poppy purge:")
+    print(f"  schedule: {', '.join(removed['schedule']) or 'nothing installed'}")
+    print(f"  mirrors:  {len(removed['mirrors'])} path(s) removed")
+    print(f"  wiring:   {', '.join(removed['wiring']) or '(none)'}")
+    if removed["data"]:
+        print(f"  data:     {removed['data']} removed")
+    elif result.get("kept_data"):
+        print(f"  data:     kept at {result['kept_data']}")
+    for error in result["errors"]:
+        print(f"  warning:  {error}")
+    cli = result.get("cli") or {}
+    if cli.get("command"):
+        print(f"to remove the CLI itself: {cli['command']}")
     return 0
 
 
@@ -1046,6 +1104,7 @@ def dispatch(args, home: Path) -> int:
         "schedule": cmd_schedule,
         "sync": cmd_sync,
         "publish": cmd_publish,
+        "purge": cmd_purge,
         "status": cmd_status,
         "selftest": cmd_selftest,
     }

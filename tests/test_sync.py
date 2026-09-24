@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -42,6 +43,12 @@ class TestSync(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        patcher = mock.patch(
+            "poppy.sync.schedule_install",
+            return_value={"kind": "systemd", "enabled": False, "sync_enabled": True, "files": {"x": "written"}},
+        )
+        self.schedule_mock = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -152,6 +159,22 @@ class TestSync(unittest.TestCase):
         self.assertTrue(result["committed"])
         self.assertEqual(result["code"], 1)  # local work done; pushes next run
         self.assertEqual(sync.load_state(home)["status"], "offline")
+
+    def test_init_schedules_auto_sync(self):
+        home, _skills, cfg = make_home(self.root, "a")
+        result = sync.init(home, cfg)
+        self.schedule_mock.assert_called_once()
+        _args, kwargs = self.schedule_mock.call_args
+        self.assertFalse(kwargs.get("include_mine", True))
+        self.assertTrue(kwargs.get("include_sync"))
+        self.assertTrue(result["schedule"]["installed"])
+
+    def test_init_no_schedule(self):
+        home, _skills, cfg = make_home(self.root, "b")
+        result = sync.init(home, cfg, with_schedule=False)
+        self.schedule_mock.assert_not_called()
+        self.assertTrue(result["schedule"]["skipped"])
+        self.assertFalse(load_config(home)["sync"]["schedule"])
 
     def test_reconcile_mirrors_refreshes_and_removes(self):
         home, skills, cfg = make_home(self.root, "a")

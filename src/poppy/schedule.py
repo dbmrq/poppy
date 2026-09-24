@@ -128,6 +128,19 @@ def platform_kind() -> str:
     return "cron"
 
 
+def _systemctl(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    try:
+        proc = subprocess.run(
+            ["systemctl", "--user", *args], capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise PoppyError(f"systemctl --user {' '.join(args)} failed: {exc}")
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        raise PoppyError(f"systemctl --user {' '.join(args)} failed: {detail}")
+    return proc
+
+
 def sync_interval_minutes(cfg: dict) -> int:
     raw = (cfg.get("sync") or {}).get("interval_min", 30)
     try:
@@ -155,64 +168,87 @@ def sync_cron_line(home: Path, cfg: dict) -> str:
     return f"*/{interval} * * * * {sys.executable} {BIN_PATH} sync run --quiet  # poppy: library sync"
 
 
-def install(home: Path, cfg: dict, dry_run: bool = False) -> dict:
+def install(
+    home: Path,
+    cfg: dict,
+    dry_run: bool = False,
+    include_mine: bool = True,
+    include_sync: bool | None = None,
+) -> dict:
+    """Install/refresh the timers. ``include_sync`` defaults to sync.enabled + sync.schedule."""
     kind = platform_kind()
-    sync_on = bool((cfg.get("sync") or {}).get("enabled"))
+    if include_sync is None:
+        sync_cfg = cfg.get("sync") or {}
+        include_sync = bool(sync_cfg.get("enabled")) and bool(sync_cfg.get("schedule", True))
+    include_sync = bool(include_sync)
     interval = sync_interval_minutes(cfg)
     if kind == "systemd":
-        service_path, timer_path = systemd_paths(MINE_LABEL)
-        service_text = MINE_SERVICE.format(python=sys.executable, bin=BIN_PATH, home=home)
-        sync_service_path, sync_timer_path = systemd_paths(SYNC_LABEL)
-        sync_service_text = SYNC_SERVICE.format(python=sys.executable, bin=BIN_PATH, home=home)
-        sync_timer_text = SYNC_TIMER.format(interval=interval)
-        files = {str(service_path): service_text, str(timer_path): MINE_TIMER}
-        if sync_on:
-            files[str(sync_service_path)] = sync_service_text
-            files[str(sync_timer_path)] = sync_timer_text
+        files: dict[str, str] = {}
+        if include_mine:
+            service_path, timer_path = systemd_paths(MINE_LABEL)
+            files[str(service_path)] = MINE_SERVICE.format(python=sys.executable, bin=BIN_PATH, home=home)
+            files[str(timer_path)] = MINE_TIMER
+        if include_sync:
+            sync_service_path, sync_timer_path = systemd_paths(SYNC_LABEL)
+            files[str(sync_service_path)] = SYNC_SERVICE.format(python=sys.executable, bin=BIN_PATH, home=home)
+            files[str(sync_timer_path)] = SYNC_TIMER.format(interval=interval)
+        if not files:
+            raise PoppyError("nothing to install: mining and sync schedules are both disabled")
         if dry_run:
-            return {"kind": kind, "enabled": False, "sync_enabled": sync_on, "files": files}
+            return {"kind": kind, "enabled": False, "sync_enabled": include_sync, "files": files}
         for path_text, content in files.items():
             atomic_write_text(Path(path_text), content)
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "--user", "enable", "--now", f"{MINE_LABEL}.timer"], check=True)
-        if sync_on:
-            subprocess.run(
-                ["systemctl", "--user", "enable", "--now", f"{SYNC_LABEL}.timer"], check=True
-            )
+        _systemctl(["daemon-reload"])
+        if include_mine:
+            _systemctl(["enable", "--now", f"{MINE_LABEL}.timer"])
+        if include_sync:
+            _systemctl(["enable", "--now", f"{SYNC_LABEL}.timer"])
         return {
             "kind": kind,
-            "enabled": True,
-            "sync_enabled": sync_on,
+            "enabled": include_mine,
+            "sync_enabled": include_sync,
             "files": {path: "written" for path in files},
         }
     if kind == "launchd":
-        path = launchd_path("mine")
-        content = MINE_PLIST.format(
-            python=sys.executable, bin=BIN_PATH, home=home, log=home / "logs" / "scheduled.log"
-        )
-        files = {str(path): content}
-        if sync_on:
-            sync_path = launchd_path("sync")
-            files[str(sync_path)] = SYNC_PLIST.format(
+        files = {}
+        if include_mine:
+            files[str(launchd_path("mine"))] = MINE_PLIST.format(
+                python=sys.executable, bin=BIN_PATH, home=home, log=home / "logs" / "scheduled.log"
+            )
+        if include_sync:
+            files[str(launchd_path("sync"))] = SYNC_PLIST.format(
                 python=sys.executable,
                 bin=BIN_PATH,
                 home=home,
                 interval_sec=interval * 60,
                 log=home / "logs" / "sync.log",
             )
+        if not files:
+            raise PoppyError("nothing to install: mining and sync schedules are both disabled")
         if dry_run:
-            return {"kind": kind, "enabled": False, "sync_enabled": sync_on, "files": files}
+            return {"kind": kind, "enabled": False, "sync_enabled": include_sync, "files": files}
         for path_text, plist in files.items():
             target = Path(path_text)
             target.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_text(target, plist)
-            subprocess.run(["launchctl", "load", "-w", str(target)], check=False)
-        return {"kind": kind, "enabled": True, "sync_enabled": sync_on, "files": {p: "written" for p in files}}
-    lines = [cron_line(home)]
-    if sync_on:
+            subprocess.run(
+                ["launchctl", "load", "-w", str(target)], check=False, capture_output=True
+            )
+        return {
+            "kind": kind,
+            "enabled": include_mine,
+            "sync_enabled": include_sync,
+            "files": {path: "written" for path in files},
+        }
+    lines = []
+    if include_mine:
+        lines.append(cron_line(home))
+    if include_sync:
         lines.append(sync_cron_line(home, cfg))
+    if not lines:
+        raise PoppyError("nothing to install: mining and sync schedules are both disabled")
     if dry_run:
-        return {"kind": "cron", "enabled": False, "sync_enabled": sync_on, "files": {}, "cron_lines": lines}
+        return {"kind": "cron", "enabled": False, "sync_enabled": include_sync, "files": {}, "cron_lines": lines}
     raise PoppyError(
         "no supported scheduler found; add these lines with `crontab -e`:\n  " + "\n  ".join(lines)
     )
@@ -237,13 +273,14 @@ def _systemd_state(label: str) -> dict:
 
 def status(home: Path, cfg: dict) -> dict:
     kind = platform_kind()
-    sync_on = bool((cfg.get("sync") or {}).get("enabled"))
+    sync_cfg = cfg.get("sync") or {}
+    sync_on = bool(sync_cfg.get("enabled")) and bool(sync_cfg.get("schedule", True))
     if kind == "systemd":
         out = {"kind": kind, **_systemd_state(MINE_LABEL)}
         if sync_on:
             out["sync"] = _systemd_state(SYNC_LABEL)
         else:
-            out["sync"] = {"installed": False, "detail": "sync not enabled"}
+            out["sync"] = {"installed": False, "detail": "sync scheduling not enabled"}
         return out
     if kind == "launchd":
         path = launchd_path("mine")
@@ -259,13 +296,13 @@ def status(home: Path, cfg: dict) -> dict:
                 "detail": str(sync_path) if sync_path.exists() else f"no plist at {sync_path}",
             }
         else:
-            out["sync"] = {"installed": False, "detail": "sync not enabled"}
+            out["sync"] = {"installed": False, "detail": "sync scheduling not enabled"}
         return out
     out = {"kind": "cron", "installed": False, "detail": f"add manually: {cron_line(home)}"}
     out["sync"] = (
         {"installed": False, "detail": f"add manually: {sync_cron_line(home, cfg)}"}
         if sync_on
-        else {"installed": False, "detail": "sync not enabled"}
+        else {"installed": False, "detail": "sync scheduling not enabled"}
     )
     return out
 
@@ -275,19 +312,19 @@ def uninstall(home: Path) -> dict:
     if kind == "systemd":
         removed = []
         for label in (MINE_LABEL, SYNC_LABEL):
-            subprocess.run(["systemctl", "--user", "disable", "--now", f"{label}.timer"], check=False)
+            _systemctl(["disable", "--now", f"{label}.timer"], check=False)
             for path in systemd_paths(label):
                 if path.exists():
                     path.unlink()
                     removed.append(str(path))
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+        _systemctl(["daemon-reload"], check=False)
         return {"kind": kind, "removed": removed}
     if kind == "launchd":
         removed = []
         for name in ("mine", "sync"):
             path = launchd_path(name)
             if path.exists():
-                subprocess.run(["launchctl", "unload", "-w", str(path)], check=False)
+                subprocess.run(["launchctl", "unload", "-w", str(path)], check=False, capture_output=True)
                 path.unlink()
                 removed.append(str(path))
         return {"kind": kind, "removed": removed}

@@ -177,11 +177,20 @@ def export(home: Path, cfg: dict) -> dict:
     return {"path": str(digest_path(home)), **stats}
 
 
+def list_wiring(home: Path) -> list[dict]:
+    """Targets where the digest was wired as a managed block."""
+    wiring = load_json(wiring_path(home), {"targets": []}) or {"targets": []}
+    return [target for target in wiring.get("targets", []) if target.get("file")]
+
+
+def clear_wiring(home: Path) -> None:
+    save_json(wiring_path(home), {"targets": []})
+
+
 def status(home: Path, cfg: dict) -> dict:
     state = load_json(state_path(home), {}) or {}
-    wiring = load_json(wiring_path(home), {"targets": []}) or {"targets": []}
     targets = []
-    for target in wiring.get("targets", []):
+    for target in list_wiring(home):
         path = Path(str(target.get("file", ""))).expanduser()
         content = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
         targets.append({"file": str(path), "exists": path.is_file(), "block": BEGIN in content})

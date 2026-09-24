@@ -27,6 +27,9 @@ JSON.
   say so when the user hesitates.
 - **Do not hand-edit `~/.poppy`.** Use the CLI; the queue and library are
   Poppy's to manage.
+- **Uninstalling is destructive.** `poppy purge` removes the schedule,
+  mirrored skills, the digest wiring, and — unless `--keep-data` — the whole
+  library. Never run it without an explicit, informed decision.
 
 ## Routing
 
@@ -40,8 +43,9 @@ JSON.
 | "What do you know about X?" | `poppy library list --json`, `poppy context show --cwd <dir>`; full text with `poppy library show <ref>` |
 | "Forget X" | `poppy library archive <ref>` (restorable) |
 | "Learn from my recent work" | `poppy mine --json` (invokes the miner agent; can take minutes) |
-| "Sync my machines" | `poppy sync run --json`; if it exits 2, `poppy sync status` |
+| "Sync my machines" | `poppy sync run --json`; automatic sync runs on the timer `poppy sync init` installed (`poppy sync status` shows it). If it exits 2, resolve the conflict it reports |
 | "Share this skill" | `poppy publish <name> --to <checkout>`, review the warnings, then `--commit [--push]` only after approval |
+| "Uninstall Poppy" | `poppy purge` prints the plan; `poppy purge --yes` applies it, `--keep-data` keeps the library. Only after an explicit, informed decision |
 | "Is Poppy healthy?" | `poppy doctor --json`, `poppy status --json` |
 | "Why did mining miss X?" | `poppy sessions search "<term>" --json`; mining is bounded by the lookback window and the candidate cap |
 

@@ -135,7 +135,7 @@ Then run (on this and every other machine, with the same URL):
 poppy sync init --remote <private-repo-url>
 ```
 
-`~/.poppy` itself becomes the git repo: the library, candidate queue, and clean rejections are tracked; machine-local state (config, sources, mirrors, usage, logs, drafts) is ignored. The command commits, pushes, and materializes mirrors on this machine. Automatic sync runs with the schedule in the next step (every `sync.interval_min`, default 30 minutes). Conflicts are never auto-merged: `poppy sync status` explains what to resolve. Skip this step entirely if the user has one machine.
+`~/.poppy` itself becomes the git repo: the library, candidate queue, and clean rejections are tracked; machine-local state (config, sources, mirrors, usage, logs, drafts) is ignored. The command commits, pushes, and materializes mirrors on this machine. It also installs the **automatic sync timer** (systemd/launchd; every `sync.interval_min`, default 30 minutes) so machines stay in sync without being prompted — pass `--no-schedule` if the user does not want background jobs. Conflicts are never auto-merged: `poppy sync status` explains what to resolve. Skip this step entirely if the user has one machine.
 
 ## 7. Schedule
 
@@ -177,6 +177,7 @@ Summarize concisely:
 - how to review the queue (`poppy ui`), how to load memories (`poppy library show <ref>`, indexed in the digest)
 - that the builtin skills are installed, so the user can ask you to operate Poppy (review, library, mining, sync, publish, doctor)
 - how to share a reviewed skill (`poppy publish <name> --to <checkout of a public skills repo>`)
+- how to remove Poppy later (`poppy purge` previews; `poppy purge --yes` removes everything, `--keep-data` keeps the library)
 - memory index wiring: where you wired it, and that `poppy context verify` passed
 - sync (if enabled): the remote, and that `poppy sync status` is clean
 - anything that failed or could not be verified

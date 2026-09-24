@@ -18,6 +18,9 @@ import subprocess
 from pathlib import Path
 
 from .config import save_config
+from .schedule import install as schedule_install
+from .schedule import status as schedule_status
+from .schedule import sync_interval_minutes
 from .skills import load_manifest, mirrors_current, reconcile_mirrors, skill_tree_hash
 from .util import (
     PoppyError,
@@ -352,8 +355,9 @@ def init(
     remote: str | None = None,
     branch: str | None = None,
     machine: str | None = None,
+    with_schedule: bool = True,
 ) -> dict:
-    """Initialize (or update) the sync repo, then run one sync."""
+    """Initialize (or update) the sync repo, run one sync, and schedule auto-sync."""
     ensure_home_layout(home)
     from . import library as library_mod
 
@@ -368,6 +372,7 @@ def init(
         sync_cfg["remote"] = remote
     sync_cfg.setdefault("branch", "main")
     sync_cfg["enabled"] = True
+    sync_cfg["schedule"] = with_schedule
     save_config(home, cfg)
 
     branch_name = str(sync_cfg.get("branch") or "main")
@@ -391,13 +396,27 @@ def init(
 
     commit_local(home, machine_id, allow_empty=True)
     result = run(home, cfg)
-    return {
+    out = {
         "created": created,
         "branch": branch_name,
         "remote": remote_url,
         "machine": machine_id,
         **result,
     }
+    if with_schedule:
+        try:
+            sched = schedule_install(home, cfg, include_mine=False, include_sync=True)
+            out["schedule"] = {
+                "installed": True,
+                "kind": sched.get("kind"),
+                "interval_min": sync_interval_minutes(cfg),
+                "files": list(sched.get("files") or {}),
+            }
+        except Exception as exc:  # a timer failure must not undo a successful sync
+            out["schedule"] = {"installed": False, "error": str(exc)}
+    else:
+        out["schedule"] = {"installed": False, "skipped": True}
+    return out
 
 
 # --------------------------------------------------------------------------- status
@@ -423,6 +442,13 @@ def status(home: Path, cfg: dict) -> dict:
     out["last_run"] = state.get("last_run")
     out["last_status"] = state.get("status")
     out["last_commit"] = state.get("last_commit")
+    sched = schedule_status(home, cfg)
+    sync_sched = sched.get("sync") or {}
+    out["schedule"] = {
+        "installed": bool(sync_sched.get("installed")),
+        "detail": sync_sched.get("detail"),
+        "interval_min": sync_interval_minutes(cfg),
+    }
     if not out["initialized"]:
         return out
 

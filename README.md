@@ -63,7 +63,17 @@ The miner explores transcripts through `poppy sessions list/search/read` (one de
 
 ## Multi-machine
 
-`~/.poppy` can be one private git repo shared by all your machines. `poppy sync init --remote <private-repo-url>` tracks the library, the candidate queue, and clean rejections; machine-local state (config, sources, mirrors, usage, logs) stays out. `poppy sync run` commits, pulls, pushes, then reconciles skill mirrors and regenerates the memory digest. It soft-fails offline and retries; conflicts are surfaced for you to resolve, never auto-merged. With sync enabled, `poppy schedule install` also installs a frequent sync timer (default every 30 minutes). Run the installer prompt on each machine with the same remote URL.
+`~/.poppy` can be one private git repo shared by all your machines. `poppy sync init --remote <private-repo-url>` tracks the library, the candidate queue, and clean rejections; machine-local state (config, sources, mirrors, usage, logs) stays out. It also installs an **automatic sync timer** (every 30 minutes by default, `sync.interval_min`), so machines stay in sync without being prompted — `--no-schedule` opts out. `poppy sync run` commits, pulls, pushes, then reconciles skill mirrors and regenerates the memory digest. It soft-fails offline and retries; conflicts are surfaced for you to resolve, never auto-merged. Run the installer prompt on each machine with the same remote URL.
+
+## Uninstall
+
+```bash
+poppy purge              # prints exactly what would be removed
+poppy purge --yes        # removes the schedule, mirrors, digest wiring, and ~/.poppy
+poppy purge --yes --keep-data   # same, but keeps the library and queue
+```
+
+Only skills Poppy manages are removed — your own skills are never touched — and the CLI checkout is left in place with a printed command to remove it. Without `--yes`, nothing happens.
 
 ## Publishing
 
@@ -98,6 +108,8 @@ poppy schedule install|status|uninstall
 poppy sync init|run|status           private-repo sync across machines
 poppy publish <skill> [--to DIR] [--subdir S] [--commit] [--push] [--force]
                         copy a reviewed skill into a public skills repo
+poppy purge [--yes] [--keep-data]
+                        remove Poppy from this machine
 poppy status            summary
 ```
 

@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V4.5** — users operate Poppy through their agent: the builtin `poppy`, `poppy-context`, and `poppy-propose` skills plus an agent-complete CLI. V4 packaging, remote UI, and broader source coverage remain. Earlier phases (V1–V4.0) are done. This document is the persistent design and is updated as phases land.
+Status: **V4.6** — users operate Poppy through their agent, machines auto-sync on a timer, and `poppy purge` removes everything cleanly. V4 packaging, remote UI, and broader source coverage remain. Earlier phases (V1–V4.5) are done. This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -248,6 +248,11 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 - **Skills are the UI.** The installer mirrors builtin skills into the user's skill directories: `poppy` (router for status, review, library, mining, sync, publish, and doctor, with a hard "ask before promoting" rule), `poppy-context` (memory fetching, V2.5), and `poppy-propose` (capture mid-session). Builtins refresh by re-running `poppy init`: unmodified copies are updated, user-edited copies are left alone (`state/builtins.json`, machine-local).
 - **The CLI is complete for agents.** Review actions missing from the CLI were added (`reject`, `discard`), `candidates show` includes the draft text, and the commands an agent drives take `--json` (`mine`, `accept`, `install`, `uninstall`, `reject`, `discard`, `publish`, `status`, `schedule status`, `sync run`). Command-specific exit codes are documented in the `poppy` skill.
 - **Mid-session capture.** `poppy propose --file <candidate.json>` queues a candidate immediately: the agent supplies judgment plus verbatim quotes, Poppy locates the session, re-verifies the quotes, applies the miner's validation (secrets, dedupe), and lands it in the same queue. Promotion stays human.
+
+**V4.6 — lifecycle: automatic sync + clean uninstall (done).**
+
+- **Automatic sync is the default.** `poppy sync init` installs/refreshes the sync timer itself (systemd/launchd; on cron-only systems it prints the line), so machines sync without being prompted. `--no-schedule` opts out, `sync.interval_min` controls the cadence (default 30), and `poppy sync status` reports whether auto-sync is live.
+- **Complete uninstall.** `poppy purge` prints a plan; `--yes` removes the schedule, Poppy's mirrored skills, the digest wiring blocks, and `~/.poppy`; `--keep-data` removes the integration but keeps the library and queue. Unmanaged skills are never touched, the CLI checkout is left in place with an explicit removal command (it may be the thing running the purge), and the `poppy` skill requires an informed decision before the agent runs it.
 
 ### Nice-to-haves (recorded, not yet built)
 

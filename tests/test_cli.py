@@ -111,9 +111,10 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn("not initialized", output)
 
-        code, output = self.run_cli("sync", "init")
+        code, output = self.run_cli("sync", "init", "--no-schedule")
         self.assertEqual(code, 0, output)
         self.assertIn("repo:", output)
+        self.assertIn("not scheduled", output)
 
         code, output = self.run_cli("sync", "status")
         self.assertEqual(code, 0, output)
@@ -180,6 +181,21 @@ class TestCli(unittest.TestCase):
         status = json.loads(output)
         self.assertIn("library", status)
         self.assertIn("queue", status)
+
+    @mock.patch("poppy.purge.schedule_uninstall", return_value={"kind": "systemd", "removed": []})
+    @mock.patch("poppy.config.detect_skills_dirs", return_value=[])
+    def test_purge_preview_and_keep_data(self, _mock_detect, _mock_schedule):
+        self.run_cli("init")
+
+        code, output = self.run_cli("purge")
+        self.assertEqual(code, 0, output)
+        self.assertIn("nothing was removed", output)
+        self.assertTrue(self.home.is_dir())
+
+        code, output = self.run_cli("purge", "--yes", "--keep-data")
+        self.assertEqual(code, 0, output)
+        self.assertIn("kept at", output)
+        self.assertTrue(self.home.is_dir())
 
 
 if __name__ == "__main__":

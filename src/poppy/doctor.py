@@ -151,7 +151,7 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
             checks.append(
                 Check("sync:mirrors", "warn", f"{drift} skill(s) out of sync — run `poppy sync run`")
             )
-        if not (status.get("sync") or {}).get("installed"):
+        if sync_cfg.get("schedule", True) and not (status.get("sync") or {}).get("installed"):
             checks.append(
                 Check("schedule:sync", "warn", "sync enabled but no sync timer — run `poppy schedule install`")
             )

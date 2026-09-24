@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
         "branch": "main",
         "machine": "",
         "interval_min": 30,
+        "schedule": True,
     },
 }
 
