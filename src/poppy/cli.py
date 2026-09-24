@@ -236,6 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true"
     )
     p = sub.add_parser("update", help="update Poppy (pipx, pip, or source checkout) and refresh builtins")
+    p.add_argument("--check", action="store_true", help="only report whether an update is available")
     p.add_argument("--json", action="store_true")
     sub.add_parser("selftest", help="run the bundled test suite")
     return parser
@@ -997,6 +998,22 @@ def cmd_purge(args, home: Path) -> int:
 
 def cmd_update(args, home: Path) -> int:
     cfg = load_config(home)
+    if args.check:
+        result = update_mod.check(home, cfg)
+        if args.json:
+            print(json.dumps(result, indent=2))
+            return 0
+        if result["update_available"] is True:
+            if result["behind"]:
+                print(f"update available: checkout is {result['behind']} commit(s) behind — run `poppy update`")
+            else:
+                print(f"update available: {result['latest']} (installed {result['installed']}) — run `poppy update`")
+            return 0
+        if result["update_available"] is False:
+            print(f"up to date ({result['installed']})")
+            return 0
+        print(f"could not check for updates ({result['detail'] or 'offline'})")
+        return 0
     result = update_mod.update(home, cfg)
     if args.json:
         print(json.dumps(result, indent=2))

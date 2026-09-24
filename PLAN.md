@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V4.9** — agent-first operation, automatic multi-machine sync, clean uninstall, packaged install (`poppy-ai`, pipx/pip/checkout) with self-update, a token-protected remote review UI, and an installer that discovers any harness's transcripts itself (no support matrix). Still open from V4: the packaging follow-ups. Earlier phases (V1–V4.8) are done. This document is the persistent design and is updated as phases land.
+Status: **V4 complete** — agent-first operation, automatic multi-machine sync, clean uninstall, packaged installs (PyPI / pipx / Homebrew / checkout) with update checks, a token-protected remote review UI, and a harness-agnostic installer. Remaining nice-to-have: usage tracking from transcripts. This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -244,11 +244,10 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 - **Reuse an existing data repo.** Before creating one, the installer reuses `sync.remote` when this machine is already configured, asks whether the user has a Poppy data repo from another machine, and otherwise checks the user's account for one (a `library/` tree plus the Poppy `.gitignore` header). It offers to reuse what it finds and never adopts a repo without explicit confirmation. `poppy sync status` points at the same path when sync is not initialized.
 - **Model selection for miner and writer.** The miner is the quality bottleneck (long-context judgment across many sessions, tool use); the writer is a constrained rewrite of one accepted candidate. The installer lists the models it can actually use, proposes concrete options with cost/quality trade-offs (one model for both / strong miner + cheap writer / strongest for both, or the CLI default), gets the user's approval, bakes model flags into `agent.miner.cmd` and `agent.writer.cmd`, and verifies both with `poppy doctor --agent`.
 
-**V4 — productize (in progress).**
+**V4 — productize (done).** Publishing flow (V4.0), CI (V4.0), packaging (V4.7), remote review UI (V4.8), installer self-sufficiency with no per-harness matrix (V4.9), and the release pipeline (V4.10).
 
-- **Publishing (done).** `poppy publish <skill> --to <checkout> [--subdir …] [--commit] [--push] [--force]` exports one reviewed skill into a public skills repo: validation is re-run, a destination that differs is never overwritten without `--force`, machine-specific details (home path, hostname) produce warnings, and the target checkout can be committed/pushed for you. The private library stays the working set; the public repo is a curated subset.
-- **CI (done).** GitHub Actions runs the stdlib test suite (Python 3.10 and 3.13) on every push and pull request.
-- **Still open:** packaging (`pipx`/single-file install, Homebrew tap, a `poppy doctor` update check — see nice-to-haves), a remote review-UI option, and more sources verified by the installer.
+- **Publishing (V4.0).** `poppy publish <skill> --to <checkout> [--subdir …] [--commit] [--push] [--force]` exports one reviewed skill into a public skills repo: validation is re-run, a destination that differs is never overwritten without `--force`, machine-specific details (home path, hostname) produce warnings, and the target checkout can be committed/pushed for you. The private library stays the working set; the public repo is a curated subset.
+- **CI (V4.0).** GitHub Actions runs the stdlib test suite (Python 3.10 and 3.13) on every push and pull request.
 
 **V4.5 — agent-first interface (done).** Users operate Poppy through their agent, not the CLI; the CLI is the API the agent drives.
 
@@ -265,15 +264,13 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 
 **V4.8 — remote review UI (done).** `poppy ui` still binds localhost by default; `--host` binds elsewhere, and a non-loopback bind without a token is refused unless `--insecure` explicitly acknowledges the risk. With a token, every request needs HTTP Basic auth (any username, the token as the password) and POSTs must be `application/json`, so a cross-site form cannot act on the library. The token can come from `ui.token` or `--token`; startup output states the URL and the auth mode. Meant for a LAN address, an SSH tunnel, or an authenticating proxy (Cloudflare Access, Tailscale) — the UI can accept skills, so it is an admin endpoint.
 
-**Still open from V4:** the packaging follow-ups (Homebrew tap, PyPI publishing, an update-available check).
-
 **V4.9 — installer self-sufficiency, no per-harness matrix (done).** Source discovery is a procedure, not a list: the installer prompt walks any harness through finding its own transcript store (own CLI export commands first, then the conventional data directories, then per-session files → SQLite → single history file), configuring it with the three generic readers, and proving it with `poppy sources test` plus a real end-to-end read. Awkward shapes — one history file for everything, or an exotic format — are handled by a small read-only extractor configured as a `command` source, kept in `~/.poppy/sources/`. The table of known harnesses is explicitly labeled examples/shapes, not a support list: adding a harness is something that harness's own agent does at install time, in the prompt, not in Poppy's code.
+
+**V4.10 — release pipeline (done).** Publishing is tag-driven: bump `__version__`, tag `vX.Y.Z`, and the `release` workflow checks the tag against the package version, builds the sdist and wheel, publishes to PyPI with trusted publishing (OIDC — no tokens), renders the Homebrew formula from the sdist's PyPI URL and sha256, and creates a GitHub release with all artifacts. `poppy update --check` reports whether a newer version exists (PyPI for pip/pipx installs, upstream commits for checkouts) and `poppy update` applies it; the installer prompt prefers `pipx install poppy-ai` with the git URL as fallback. One-time setup (a PyPI pending trusted publisher and a `dbmrq/homebrew-poppy` tap repo) is documented in `packaging/README.md`.
 
 ### Nice-to-haves (recorded, not yet built)
 
-- **Mid-session proposals:** a small `poppy propose` CLI plus a builtin skill so an interactive agent can file a candidate (with evidence) the moment it learns something, instead of waiting for the scheduled miner. Must reuse the same validation (quotes, secrets, dedupe) and land in the same queue.
 - **Miner follow-ups:** track entry usage from transcripts (a skill loaded mid-session is visible in the session JSON) so decay can use real usage rather than age alone.
-- **Packaging follow-ups:** a Homebrew tap, PyPI publishing, and a `poppy doctor` check for available updates.
 
 ## 12. Long game: the seven rules
 

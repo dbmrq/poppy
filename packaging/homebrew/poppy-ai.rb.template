@@ -1,0 +1,19 @@
+class PoppyAi < Formula
+  include Language::Python::Virtualenv
+
+  desc "Turn coding-agent session history into reviewed skills, memories, and rules"
+  homepage "https://github.com/dbmrq/poppy"
+  url "__SDIST_URL__"
+  sha256 "__SDIST_SHA256__"
+  license "MIT"
+
+  depends_on "python@3.13"
+
+  def install
+    virtualenv_install_with_resources
+  end
+
+  test do
+    assert_match "poppy", shell_output("#{bin}/poppy --version")
+  end
+end

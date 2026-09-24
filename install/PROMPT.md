@@ -9,11 +9,13 @@ If `~/.poppy` already exists, treat this as an update: read the existing config 
 Prefer an isolated install (no sudo) and verify it before moving on:
 
 ```bash
-# preferred: pipx
-command -v pipx >/dev/null && pipx install git+https://github.com/dbmrq/poppy.git
+# preferred: pipx, from PyPI when the release is published
+pipx install poppy-ai
+# if PyPI does not have it yet, install from git instead:
+pipx install git+https://github.com/dbmrq/poppy.git
 ```
 
-If pipx is unavailable, use `python3 -m pip install --user git+https://github.com/dbmrq/poppy.git` (or `pip install` inside a virtualenv). If neither works — no pip, or an externally-managed Python — fall back to a checkout:
+If pipx is unavailable, use `python3 -m pip install --user poppy-ai` (or the same command with the git URL above, or `pip install` inside a virtualenv). If neither works — no pip, or an externally-managed Python — fall back to a checkout:
 
 ```bash
 git clone --depth 1 https://github.com/dbmrq/poppy.git ~/.local/share/poppy

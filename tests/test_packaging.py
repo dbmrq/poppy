@@ -6,7 +6,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from poppy import update  # noqa: E402
+from poppy import __version__, update  # noqa: E402
 from poppy.util import DATA_DIR, REPO_ROOT, launch_command, launch_command_str  # noqa: E402
 
 
@@ -67,6 +67,43 @@ class TestUpdate(unittest.TestCase):
             with self.assertRaises(Exception) as ctx:
                 update.update(self.home, {})
         self.assertIn("pip install --upgrade", str(ctx.exception))
+
+    def test_version_key_orders_numerically(self):
+        self.assertGreater(update._version_key("0.10.0"), update._version_key("0.9.0"))
+        self.assertGreater(update._version_key("1.0.0"), update._version_key("1.0.0-rc1"))
+        self.assertEqual(update._version_key("0.1.0"), update._version_key("0.1.0"))
+
+    def test_check_reports_update_from_pypi(self):
+        with mock.patch.object(update, "install_mode", return_value="pipx"), mock.patch.object(
+            update, "_latest_from_pypi", return_value=("9.9.9", "")
+        ):
+            result = update.check(self.home, {})
+        self.assertTrue(result["update_available"])
+        self.assertEqual(result["latest"], "9.9.9")
+        self.assertEqual(result["installed"], __version__)
+
+    def test_check_reports_up_to_date(self):
+        with mock.patch.object(update, "install_mode", return_value="pipx"), mock.patch.object(
+            update, "_latest_from_pypi", return_value=(__version__, "")
+        ):
+            result = update.check(self.home, {})
+        self.assertFalse(result["update_available"])
+
+    def test_check_offline_is_unknown(self):
+        with mock.patch.object(update, "install_mode", return_value="pip"), mock.patch.object(
+            update, "_latest_from_pypi", return_value=(None, "offline")
+        ):
+            result = update.check(self.home, {})
+        self.assertIsNone(result["update_available"])
+        self.assertEqual(result["detail"], "offline")
+
+    def test_check_checkout_behind(self):
+        with mock.patch.object(update, "install_mode", return_value="checkout"), mock.patch.object(
+            update, "_checkout_behind", return_value=(2, "")
+        ):
+            result = update.check(self.home, {})
+        self.assertTrue(result["update_available"])
+        self.assertEqual(result["behind"], 2)
 
 
 if __name__ == "__main__":
