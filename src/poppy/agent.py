@@ -13,7 +13,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .util import PoppyError, atomic_write_text, tail, temp_text_file
+from .schedule import scheduled_path
+from .util import PoppyError, atomic_write_text, extended_path, tail, temp_text_file
 
 
 @dataclass
@@ -90,6 +91,9 @@ def run_agent(
     argv, stdin_text, temp_files = _build_argv(cmd, prompt)
     env = os.environ.copy()
     env["POPPY_HOME"] = str(home)
+    # Scheduled runs start from a minimal PATH; add the timer PATH and common
+    # user bin directories so the command the installer verified still resolves.
+    env["PATH"] = extended_path(env.get("PATH"), scheduled_path(cfg))
     env.update(env_extra or {})
 
     started = time.time()

@@ -833,7 +833,7 @@ def cmd_schedule(args, home: Path) -> int:
         sync = status.get("sync") or {}
         print(f"sync:    {'installed' if sync.get('installed') else 'not installed'}: {sync.get('detail')}")
         return 0
-    result = schedule_uninstall(home)
+    result = schedule_uninstall(home, cfg)
     for path in result.get("removed", []):
         print(f"removed {path}")
     print(f"scheduler: {result['kind']}")
@@ -887,6 +887,19 @@ def _print_sync_status(status: dict) -> None:
     print("state:   " + (" · ".join(bits) if bits else "clean · up to date"))
     if status.get("last_run"):
         print(f"last:    {status['last_run']} ({status.get('last_status') or '?'})")
+    if status.get("last_error"):
+        print(f"reason:  {status['last_error']}")
+    if status.get("env_file_error"):
+        print(f"env:     {status['env_file_error']}")
+    probe = status.get("scheduled_probe") or {}
+    if probe.get("at"):
+        if probe.get("ok"):
+            print(f"timer:   fetch ok under the timer's environment (checked {probe['at']})")
+        elif probe.get("ok") is False:
+            print(
+                f"timer:   cannot reach the remote from the timer's environment "
+                f"(checked {probe['at']}): {probe.get('detail') or 'unknown error'}"
+            )
     mirrors = status.get("mirrors") or {}
     if mirrors:
         print(
@@ -923,6 +936,12 @@ def cmd_sync(args, home: Path) -> int:
             print(f"auto:    every {sched.get('interval_min', 30)} min ({sched.get('kind')})")
         elif sched.get("error"):
             print(f"auto:    not scheduled — {sched['error']}")
+        probe = result.get("scheduled_probe") or {}
+        if probe.get("ok"):
+            print("timer:   fetch ok under the timer's environment")
+        elif probe.get("ok") is False:
+            print(f"timer:   cannot reach the remote from the timer's environment: {probe.get('detail') or 'unknown error'}")
+            print("         set `sync.env_file` to a KEY=value file the timer can read, then re-run `poppy sync init`")
         return 2 if int(result.get("code", 0)) == 2 else 0
     if args.sync_command == "run":
         try:
@@ -1109,6 +1128,8 @@ def cmd_status(args, home: Path) -> int:
             bits.append(f"ahead {sync_state['ahead']}")
         if sync_state["behind"]:
             bits.append(f"behind {sync_state['behind']}")
+        if sync_state.get("last_status") in ("offline", "error", "conflict"):
+            bits.append(f"last sync {sync_state['last_status']}")
         detail = " · ".join(bits) or "up to date"
         print(
             f"sync:      {sync_state['remote'] or 'local only'} ({detail}; "

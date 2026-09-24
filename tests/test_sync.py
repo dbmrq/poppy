@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import sys
@@ -158,7 +159,57 @@ class TestSync(unittest.TestCase):
         self.assertTrue(result["offline"])
         self.assertTrue(result["committed"])
         self.assertEqual(result["code"], 1)  # local work done; pushes next run
-        self.assertEqual(sync.load_state(home)["status"], "offline")
+        state = sync.load_state(home)
+        self.assertEqual(state["status"], "offline")
+        self.assertTrue(state.get("error"))  # the reason is kept for doctor/status
+
+    def test_env_file_feeds_scheduled_runs(self):
+        home, _skills, cfg = make_home(self.root, "a")
+        env_file = self.root / "vault.env"
+        env_file.write_text(
+            "export POPPY_TEST_TOKEN=abc123\n# a comment\nPOPPY_TEST_OTHER='quoted value'\nignored line\n",
+            encoding="utf-8",
+        )
+        cfg["sync"]["env_file"] = str(env_file)
+        cfg["schedule"]["path"] = "/opt/homebrew/bin"
+        with mock.patch.dict(os.environ, {}, clear=False):
+            error = sync.apply_environment(cfg)
+            self.assertEqual(error, "")
+            self.assertEqual(os.environ.get("POPPY_TEST_TOKEN"), "abc123")
+            self.assertEqual(os.environ.get("POPPY_TEST_OTHER"), "quoted value")
+            self.assertIn("/opt/homebrew/bin", os.environ["PATH"].split(os.pathsep))
+            self.assertIn("/usr/bin", os.environ["PATH"].split(os.pathsep))
+
+    def test_missing_env_file_is_reported(self):
+        home, _skills, cfg = make_home(self.root, "a")
+        cfg["sync"]["env_file"] = str(self.root / "missing.env")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            error = sync.apply_environment(cfg)
+        self.assertIn("missing.env", error)
+
+    def test_probe_scheduled_reports_fetch_result(self):
+        remote = self.bare_remote()
+        home, _skills, cfg = make_home(self.root, "a")
+        sync.init(home, cfg, remote=str(remote), with_schedule=False)
+        cfg["schedule"]["path"] = "/usr/bin:/bin"
+
+        probe = sync.probe_scheduled(home, cfg)
+        self.assertTrue(probe["ok"], probe.get("detail"))
+
+        shutil.rmtree(remote)
+        probe = sync.probe_scheduled(home, cfg)
+        self.assertFalse(probe["ok"])
+        self.assertTrue(probe["detail"])
+
+    def test_init_probes_and_keeps_the_probe(self):
+        remote = self.bare_remote()
+        home, _skills, cfg = make_home(self.root, "a")
+        result = sync.init(home, cfg, remote=str(remote))
+        self.assertTrue(result["scheduled_probe"]["ok"], result["scheduled_probe"].get("detail"))
+        self.assertTrue(sync.load_state(home).get("scheduled_probe"))
+
+        sync.run(home, cfg)
+        self.assertTrue(sync.load_state(home).get("scheduled_probe"))  # preserved across runs
 
     def test_init_schedules_auto_sync(self):
         home, _skills, cfg = make_home(self.root, "a")

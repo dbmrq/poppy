@@ -58,7 +58,7 @@ def purge(home: Path, cfg: dict, yes: bool = False, keep_data: bool = False) -> 
     }
 
     try:
-        sched = schedule_uninstall(home)
+        sched = schedule_uninstall(home, cfg)
         result["removed"]["schedule"] = sched.get("removed", [])
         if sched.get("detail"):
             result["errors"].append(f"schedule: {sched['detail']}")

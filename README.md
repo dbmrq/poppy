@@ -67,6 +67,8 @@ The miner explores transcripts through `poppy sessions list/search/read` (one de
 
 `~/.poppy` can be one private git repo shared by all your machines. `poppy sync init --remote <private-repo-url>` tracks the library, the candidate queue, and clean rejections; machine-local state (config, sources, mirrors, usage, logs) stays out. It also installs an **automatic sync timer** (every 30 minutes by default, `sync.interval_min`), so machines stay in sync without being prompted — `--no-schedule` opts out. `poppy sync run` commits, pulls, pushes, then reconciles skill mirrors and regenerates the memory digest. It soft-fails offline and retries; conflicts are surfaced for you to resolve, never auto-merged. Run the installer prompt on each machine with the same remote URL.
 
+Timers run with the scheduler's environment, not your shell's, so credentials that only exist in interactive startup files are invisible to scheduled syncs. `poppy sync init` probes the timer's access and reports whether it can reach the remote; if it cannot, point `sync.env_file` at a readable `KEY=value` file (machine-local, never synced) and re-run it. `poppy sync status` keeps showing the last failure's reason, and `poppy doctor` warns while the timer is offline.
+
 ## Remote review
 
 `poppy ui` binds localhost by default. To review from another device, bind an address and set a token (HTTP Basic; any username, the token as the password):

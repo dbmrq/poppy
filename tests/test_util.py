@@ -1,10 +1,19 @@
+import os
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from poppy.util import PoppyError, norm_ws, parse_duration, scan_secrets, sha  # noqa: E402
+from poppy.util import (  # noqa: E402
+    PoppyError,
+    extended_path,
+    norm_ws,
+    parse_duration,
+    redact_userinfo,
+    scan_secrets,
+    sha,
+)
 
 
 class TestUtil(unittest.TestCase):
@@ -30,6 +39,31 @@ class TestUtil(unittest.TestCase):
         low = scan_secrets('api_key = "abcdefghijklmnop"')
         self.assertTrue(any(severity == "low" for severity, _, _ in low))
         self.assertEqual(scan_secrets("nothing to see here"), [])
+
+    def test_extended_path_keeps_precedence_and_appends(self):
+        out = extended_path("/first:/usr/bin", "/first:/extra")
+        parts = out.split(os.pathsep)
+        self.assertEqual(parts[0], "/first")
+        self.assertEqual(parts[1], "/usr/bin")
+        self.assertIn("/extra", parts)
+        self.assertLess(parts.index("/usr/bin"), parts.index("/extra"))
+        # fallback directories are always present, and nothing repeats
+        self.assertIn("/bin", parts)
+        self.assertIn("/usr/sbin", parts)
+        self.assertEqual(len(parts), len(set(parts)))
+
+    def test_extended_path_from_empty_base(self):
+        parts = extended_path("", "/opt/homebrew/bin").split(os.pathsep)
+        self.assertEqual(parts[0], "/opt/homebrew/bin")
+        self.assertIn("/usr/bin", parts)
+
+    def test_redact_userinfo(self):
+        self.assertEqual(
+            redact_userinfo("fetch https://user:tok@github.com/x.git failed"),
+            "fetch https://***@github.com/x.git failed",
+        )
+        self.assertEqual(redact_userinfo("plain https://github.com/x.git"), "plain https://github.com/x.git")
+        self.assertEqual(redact_userinfo(None), "")
 
 
 if __name__ == "__main__":

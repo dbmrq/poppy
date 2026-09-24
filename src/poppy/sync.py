@@ -14,11 +14,14 @@ soft-fail and retry on the next run. No agent, no per-harness code.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
 from .config import save_config
 from .schedule import install as schedule_install
+from .schedule import platform_kind
+from .schedule import scheduled_path
 from .schedule import status as schedule_status
 from .schedule import sync_interval_minutes
 from .skills import load_manifest, mirrors_current, reconcile_mirrors, skill_tree_hash
@@ -27,8 +30,10 @@ from .util import (
     acquire_lock,
     atomic_write_text,
     ensure_home_layout,
+    extended_path,
     load_json,
     now_iso,
+    redact_userinfo,
     release_lock,
     save_json,
     tail,
@@ -247,6 +252,115 @@ def materialize(home: Path, cfg: dict) -> dict:
     return {"mirrors": mirrors, "digest": digest_result}
 
 
+# --------------------------------------------------------------------------- scheduled environment
+
+
+def env_file_path(cfg: dict) -> Path | None:
+    raw = str((cfg.get("sync") or {}).get("env_file") or "").strip()
+    return Path(raw).expanduser() if raw else None
+
+
+def parse_env_file(text: str) -> dict[str, str]:
+    """Read simple ``KEY=value`` lines (``export`` allowed, quotes stripped).
+
+    Deliberately not a shell: no command substitution, no expansion. Enough
+    for the credential files vault helpers and dotfiles setups write.
+    """
+    values: dict[str, str] = {}
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def load_env_file(path: Path) -> tuple[dict[str, str], str]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return {}, f"cannot read {path}: {exc}"
+    return parse_env_file(text), ""
+
+
+def apply_environment(cfg: dict) -> str:
+    """Give this process the environment a scheduled run needs.
+
+    Loads ``sync.env_file`` (credentials the timer cannot see) and extends PATH
+    with the timer PATH and common user bin directories, so git credential
+    helpers and other tools resolve the same way they do for the installer.
+    Returns an error string when the configured env file cannot be read.
+    """
+    error = ""
+    path = env_file_path(cfg)
+    if path:
+        values, error = load_env_file(path)
+        os.environ.update(values)
+    stored = scheduled_path(cfg)
+    os.environ["PATH"] = extended_path(os.environ.get("PATH"), stored)
+    return error
+
+
+def _scheduler_env(cfg: dict) -> dict[str, str]:
+    """An approximation of the environment a timer sees, for probing.
+
+    Session-scoped services (the ssh agent, the user D-Bus) are available to
+    timers, so they are carried over; interactive-shell variables are not.
+    """
+    env: dict[str, str] = {
+        "HOME": str(Path.home()),
+        "PATH": scheduled_path(cfg) or extended_path("", None),
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_SSH_COMMAND": "ssh -o BatchMode=yes",
+    }
+    for key in ("SSH_AUTH_SOCK", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
+    path = env_file_path(cfg)
+    if path:
+        values, _error = load_env_file(path)
+        env.update(values)
+    return env
+
+
+def probe_scheduled(home: Path, cfg: dict) -> dict:
+    """Fetch with the timer's environment to catch credential/PATH problems."""
+    remote = str((cfg.get("sync") or {}).get("remote") or "").strip()
+    if not remote:
+        return {"ok": None, "at": now_iso(), "detail": "no remote configured"}
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(home), "fetch", "--quiet", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT,
+            env=_scheduler_env(cfg),
+        )
+    except FileNotFoundError:
+        return {"ok": False, "at": now_iso(), "detail": "git is not installed"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "at": now_iso(), "detail": f"fetch timed out after {GIT_TIMEOUT}s"}
+    detail = "" if proc.returncode == 0 else redact_userinfo(tail((proc.stderr or proc.stdout).strip(), 300))
+    return {"ok": proc.returncode == 0, "at": now_iso(), "detail": detail}
+
+
+def store_probe(home: Path, probe: dict) -> None:
+    state = load_state(home)
+    state["scheduled_probe"] = probe
+    save_json(state_path(home), state)
+
+
 # --------------------------------------------------------------------------- run
 
 
@@ -288,6 +402,9 @@ def run(home: Path, cfg: dict) -> dict:
     remote = str(sync_cfg.get("remote") or "").strip()
     branch = str(sync_cfg.get("branch") or "main").strip() or "main"
     result: dict = {"repo": str(home), "machine": machine, "remote": remote, "branch": branch}
+    env_file_error = apply_environment(cfg)
+    if env_file_error:
+        result["env_file_error"] = env_file_error
     try:
         ensure_gitignore(home)
         result["committed"] = commit_local(home, machine)
@@ -295,7 +412,7 @@ def run(home: Path, cfg: dict) -> dict:
         for key in ("fetched", "pulled", "pushed", "offline", "conflict"):
             result[key] = bool(ops.get(key))
         if ops.get("error"):
-            result["remote_error"] = ops["error"]
+            result["remote_error"] = redact_userinfo(ops["error"])
         result["materialized"] = materialize(home, cfg)
     finally:
         release_lock(lock)
@@ -328,8 +445,8 @@ def run(home: Path, cfg: dict) -> dict:
         status = "synced"
     else:
         status = "ok"
-    save_json(
-        state_path(home),
+    state = load_state(home)
+    state.update(
         {
             "machine": machine,
             "last_run": result["finished_at"],
@@ -340,11 +457,14 @@ def run(home: Path, cfg: dict) -> dict:
             "pulled": bool(result.get("pulled")),
             "pushed": bool(result.get("pushed")),
             "offline": bool(result.get("offline")),
+            "error": redact_userinfo(result.get("remote_error") or "") or None,
+            "env_file_error": result.get("env_file_error") or None,
             "mirrors": {
                 key: len(mirrors.get(key) or []) for key in ("installed", "updated", "removed", "errors")
             },
-        },
+        }
     )
+    save_json(state_path(home), state)
     _append_log(home, result)
     return result
 
@@ -416,6 +536,13 @@ def init(
             out["schedule"] = {"installed": False, "error": str(exc)}
     else:
         out["schedule"] = {"installed": False, "skipped": True}
+    if remote_url and (out.get("schedule") or {}).get("installed"):
+        try:
+            probe = probe_scheduled(home, cfg)
+            store_probe(home, probe)
+            out["scheduled_probe"] = probe
+        except Exception as exc:  # a probe failure must not undo a successful sync
+            out["scheduled_probe"] = {"ok": False, "at": now_iso(), "detail": str(exc)}
     return out
 
 
@@ -442,6 +569,9 @@ def status(home: Path, cfg: dict) -> dict:
     out["last_run"] = state.get("last_run")
     out["last_status"] = state.get("status")
     out["last_commit"] = state.get("last_commit")
+    out["last_error"] = state.get("error")
+    out["env_file_error"] = state.get("env_file_error")
+    out["scheduled_probe"] = state.get("scheduled_probe")
     sched = schedule_status(home, cfg)
     sync_sched = sched.get("sync") or {}
     out["schedule"] = {

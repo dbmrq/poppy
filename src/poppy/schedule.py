@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import os
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
-from .util import PoppyError, atomic_write_text, launch_command, launch_command_str
+from .config import save_config
+from .util import (
+    PoppyError,
+    atomic_write_text,
+    extended_path,
+    launch_command,
+    launch_command_str,
+)
 
 MINE_LABEL = "poppy-mine"
 SYNC_LABEL = "poppy-sync"
@@ -20,6 +29,7 @@ Description=Poppy: mine recent agent sessions for reusable skills
 Type=oneshot
 ExecStart={cmd} mine --quiet
 Environment=POPPY_HOME={home}
+Environment=PATH={path}
 Nice=10
 """
 
@@ -42,6 +52,7 @@ Description=Poppy: sync the library with its private git remote
 Type=oneshot
 ExecStart={cmd} sync run --quiet
 Environment=POPPY_HOME={home}
+Environment=PATH={path}
 SuccessExitStatus=1
 Nice=10
 """
@@ -67,7 +78,7 @@ PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
   <array>
 {program_arguments}  </array>
   <key>EnvironmentVariables</key>
-  <dict><key>POPPY_HOME</key><string>{home}</string><key>HOME</key><string>{user_home}</string></dict>
+  <dict><key>POPPY_HOME</key><string>{home}</string><key>HOME</key><string>{user_home}</string><key>PATH</key><string>{path}</string></dict>
 {schedule}  <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
 </dict>
@@ -87,13 +98,14 @@ SYNC_INTERVAL = """  <key>RunAtLoad</key><true/>
 """
 
 
-def _plist(label: str, args: list[str], home: Path, log: Path, schedule_xml: str) -> str:
+def _plist(label: str, args: list[str], home: Path, log: Path, schedule_xml: str, path: str) -> str:
     program_arguments = "".join(f"    <string>{xml_escape(part)}</string>\n" for part in args)
     return PLIST_TEMPLATE.format(
         label=label,
         program_arguments=program_arguments,
         home=xml_escape(str(home)),
         user_home=xml_escape(str(Path.home())),
+        path=xml_escape(path),
         schedule=schedule_xml,
         log=xml_escape(str(log)),
     )
@@ -150,13 +162,39 @@ def launchd_path(name: str) -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"com.poppy.{name}.plist"
 
 
-def cron_line(home: Path) -> str:
-    return f"0 9 * * 1 {launch_command_str()} mine --quiet  # poppy: weekly skills mining"
+def scheduled_path(cfg: dict) -> str:
+    """The PATH embedded into installed timers (set at install time)."""
+    return str((cfg.get("schedule") or {}).get("path") or "")
+
+
+def resolve_schedule_path(cfg: dict) -> str:
+    """The PATH to embed: this environment's, plus any stored timer PATH."""
+    return extended_path(os.environ.get("PATH"), scheduled_path(cfg))
+
+
+def _systemd_path_value(path: str) -> str:
+    # systemd expands % specifiers in Environment= values.
+    return path.replace("%", "%%")
+
+
+def _cron_command(path: str, command: str) -> str:
+    """Prefix a cron command with the timer PATH; cron environments are minimal."""
+    return f"/usr/bin/env PATH={shlex.quote(path)} {command}"
+
+
+def cron_line(home: Path, cfg: dict) -> str:
+    return (
+        f"0 9 * * 1 {_cron_command(resolve_schedule_path(cfg), launch_command_str())} "
+        "mine --quiet  # poppy: weekly skills mining"
+    )
 
 
 def sync_cron_line(home: Path, cfg: dict) -> str:
     interval = sync_interval_minutes(cfg)
-    return f"*/{interval} * * * * {launch_command_str()} sync run --quiet  # poppy: library sync"
+    return (
+        f"*/{interval} * * * * {_cron_command(resolve_schedule_path(cfg), launch_command_str())} "
+        "sync run --quiet  # poppy: library sync"
+    )
 
 
 def install(
@@ -173,20 +211,29 @@ def install(
         include_sync = bool(sync_cfg.get("enabled")) and bool(sync_cfg.get("schedule", True))
     include_sync = bool(include_sync)
     interval = sync_interval_minutes(cfg)
+    path = resolve_schedule_path(cfg)
+    stored_path = scheduled_path(cfg)
     if kind == "systemd":
         files: dict[str, str] = {}
         if include_mine:
             service_path, timer_path = systemd_paths(MINE_LABEL)
-            files[str(service_path)] = MINE_SERVICE.format(cmd=launch_command_str(), home=home)
+            files[str(service_path)] = MINE_SERVICE.format(
+                cmd=launch_command_str(), home=home, path=_systemd_path_value(path)
+            )
             files[str(timer_path)] = MINE_TIMER
         if include_sync:
             sync_service_path, sync_timer_path = systemd_paths(SYNC_LABEL)
-            files[str(sync_service_path)] = SYNC_SERVICE.format(cmd=launch_command_str(), home=home)
+            files[str(sync_service_path)] = SYNC_SERVICE.format(
+                cmd=launch_command_str(), home=home, path=_systemd_path_value(path)
+            )
             files[str(sync_timer_path)] = SYNC_TIMER.format(interval=interval)
         if not files:
             raise PoppyError("nothing to install: mining and sync schedules are both disabled")
         if dry_run:
             return {"kind": kind, "enabled": False, "sync_enabled": include_sync, "files": files}
+        if path != stored_path:
+            cfg.setdefault("schedule", {})["path"] = path
+            save_config(home, cfg)
         for path_text, content in files.items():
             atomic_write_text(Path(path_text), content)
         _systemctl(["daemon-reload"])
@@ -209,6 +256,7 @@ def install(
                 home,
                 home / "logs" / "scheduled.log",
                 MINE_CALENDAR,
+                path,
             )
         if include_sync:
             files[str(launchd_path("sync"))] = _plist(
@@ -217,11 +265,15 @@ def install(
                 home,
                 home / "logs" / "sync.log",
                 SYNC_INTERVAL.format(interval_sec=interval * 60),
+                path,
             )
         if not files:
             raise PoppyError("nothing to install: mining and sync schedules are both disabled")
         if dry_run:
             return {"kind": kind, "enabled": False, "sync_enabled": include_sync, "files": files}
+        if path != stored_path:
+            cfg.setdefault("schedule", {})["path"] = path
+            save_config(home, cfg)
         for path_text, plist in files.items():
             target = Path(path_text)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -293,7 +345,7 @@ def status(home: Path, cfg: dict) -> dict:
         else:
             out["sync"] = {"installed": False, "detail": "sync scheduling not enabled"}
         return out
-    out = {"kind": "cron", "installed": False, "detail": f"add manually: {cron_line(home)}"}
+    out = {"kind": "cron", "installed": False, "detail": f"add manually: {cron_line(home, cfg)}"}
     out["sync"] = (
         {"installed": False, "detail": f"add manually: {sync_cron_line(home, cfg)}"}
         if sync_on
@@ -302,7 +354,7 @@ def status(home: Path, cfg: dict) -> dict:
     return out
 
 
-def uninstall(home: Path) -> dict:
+def uninstall(home: Path, cfg: dict | None = None) -> dict:
     kind = platform_kind()
     if kind == "systemd":
         removed = []
@@ -326,5 +378,5 @@ def uninstall(home: Path) -> dict:
     return {
         "kind": "cron",
         "removed": [],
-        "detail": f"remove manually: {cron_line(home)}",
+        "detail": f"remove manually: {cron_line(home, cfg or {})}",
     }

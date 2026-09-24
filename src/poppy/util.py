@@ -18,6 +18,17 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 DATA_DIR = PACKAGE_DIR / "data"
 REPO_ROOT = PACKAGE_DIR.parents[1]  # the checkout root when running from a source tree
 
+# Convenience locations for user-installed tools, appended to PATH for
+# scheduled runs and agent subprocesses. Not a support matrix: any directory
+# already on PATH keeps its precedence, and missing entries are harmless.
+COMMON_BIN_DIRS = (
+    "~/.local/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/home/linuxbrew/.linuxbrew/bin",
+)
+FALLBACK_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
+
 
 def _installed_console_script() -> str | None:
     """The `poppy` script on PATH, but only when it belongs to this install."""
@@ -52,6 +63,36 @@ def launch_command() -> list[str]:
 
 def launch_command_str() -> str:
     return " ".join(shlex.quote(part) for part in launch_command())
+
+
+def _path_entries(value: str | None) -> list[str]:
+    return [part for part in str(value or "").split(os.pathsep) if part]
+
+
+def extended_path(current: str | None = None, extra: str | None = None) -> str:
+    """A PATH that keeps its precedence but also carries user tool directories.
+
+    Scheduled runs (launchd, systemd, cron) start with a much smaller
+    environment than the shell the installer verified the agent command in, so
+    a command that works interactively can be missing from the timer. This
+    appends the stored timer PATH (``extra``) and common user bin directories
+    to ``current`` (``os.environ`` by default), preserving the order and
+    precedence of entries that already exist.
+    """
+    base = _path_entries(os.environ.get("PATH") if current is None else current)
+    candidates: list[str] = [*_path_entries(extra)]
+    candidates.extend(str(Path(raw).expanduser()) for raw in COMMON_BIN_DIRS)
+    candidates.extend(FALLBACK_BIN_DIRS)
+    entries: list[str] = []
+    for entry in [*base, *candidates]:
+        if entry and entry not in entries:
+            entries.append(entry)
+    return os.pathsep.join(entries)
+
+
+def redact_userinfo(text: str | None) -> str:
+    """Strip credentials embedded in URLs before text is logged or stored."""
+    return re.sub(r"(://)[^/\s@]*@", r"\1***@", text or "")
 
 
 class PoppyError(Exception):

@@ -23,6 +23,12 @@ DEFAULT_CONFIG = {
     },
     "ui": {"host": "127.0.0.1", "port": 8788, "token": ""},
     "publish": {"target": "", "subdir": ""},
+    "schedule": {
+        # PATH embedded into installed timers (set by `poppy schedule install`):
+        # the installing shell's PATH plus common user bin directories, so
+        # scheduled runs resolve the same tools the installer verified.
+        "path": "",
+    },
     "sync": {
         "enabled": False,
         "remote": "",
@@ -30,6 +36,9 @@ DEFAULT_CONFIG = {
         "machine": "",
         "interval_min": 30,
         "schedule": True,
+        # Optional KEY=value file (or `export KEY=value` lines) loaded before
+        # scheduled syncs, for credentials the timer environment cannot see.
+        "env_file": "",
     },
 }
 

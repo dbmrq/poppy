@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,12 +12,13 @@ from . import library
 from .agent import test_agent
 from .candidates import list_candidates
 from .config import config_path, load_config
+from .schedule import scheduled_path
 from .schedule import status as schedule_status
 from .skills import load_manifest, skills_dir_paths
 from .sources import load_sources
 from .sync import status as sync_status
 from .update import install_mode
-from .util import PoppyError
+from .util import PoppyError, tail
 
 
 @dataclass
@@ -131,6 +133,36 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
     checks.append(
         Check("schedule", "ok" if status.get("installed") else "warn", status.get("detail", ""))
     )
+    if status.get("installed") and status.get("kind") in ("launchd", "systemd"):
+        stored = scheduled_path(cfg)
+        if not stored:
+            checks.append(
+                Check(
+                    "schedule:env",
+                    "warn",
+                    "timer carries no PATH — re-run `poppy schedule install` so scheduled runs find your tools",
+                )
+            )
+        else:
+            missing = []
+            for role in ("miner", "writer"):
+                cmd = ((cfg.get("agent") or {}).get(role) or {}).get("cmd")
+                if cmd and shutil.which(str(cmd[0]), path=stored) is None:
+                    missing.append(f"{role} ({cmd[0]})")
+            if missing:
+                checks.append(
+                    Check(
+                        "schedule:env",
+                        "fail",
+                        "not resolvable under the timer's PATH: "
+                        + ", ".join(missing)
+                        + " — use an absolute path or re-run `poppy schedule install`",
+                    )
+                )
+            else:
+                checks.append(
+                    Check("schedule:env", "ok", "agent commands resolve under the timer's PATH")
+                )
 
     sync_cfg = cfg.get("sync") or {}
     if sync_cfg.get("enabled"):
@@ -142,6 +174,8 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
                 Check("sync", "fail", f"rebase in progress — resolve manually in {sync['repo']}")
             )
         else:
+            last_status = sync.get("last_status")
+            bad_run = last_status in ("offline", "error", "conflict")
             bits = [f"remote {sync['remote'] or '(local only)'}"]
             if sync["dirty"]:
                 bits.append("uncommitted changes")
@@ -149,8 +183,31 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
                 bits.append(f"ahead {sync['ahead']}")
             if sync["behind"]:
                 bits.append(f"behind {sync['behind']}")
-            problem = sync["dirty"] or sync["ahead"] or sync["behind"]
+            if bad_run:
+                bits.append(f"last sync {last_status}")
+                if sync.get("last_error"):
+                    bits.append(tail(sync["last_error"], 160))
+            problem = sync["dirty"] or sync["ahead"] or sync["behind"] or bad_run
             checks.append(Check("sync", "warn" if problem else "ok", " · ".join(bits)))
+            if sync.get("env_file_error"):
+                checks.append(
+                    Check(
+                        "sync:env-file",
+                        "warn",
+                        f"sync.env_file: {sync['env_file_error']}",
+                    )
+                )
+            probe = sync.get("scheduled_probe") or {}
+            if probe.get("ok") is False and (status.get("sync") or {}).get("installed"):
+                checks.append(
+                    Check(
+                        "sync:probe",
+                        "warn",
+                        f"the timer could not reach the remote (checked {probe.get('at')}): "
+                        f"{probe.get('detail') or 'unknown error'}"
+                        " — give the timer credentials with `sync.env_file` or fix them",
+                    )
+                )
         mirrors = sync.get("mirrors") or {}
         drift = (
             len(mirrors.get("not_mirrored") or [])

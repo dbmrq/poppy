@@ -45,7 +45,7 @@ JSON.
 | "What do you know about X?" | `poppy library list --json`, `poppy context show --cwd <dir>`; full text with `poppy library show <ref>` |
 | "Forget X" | `poppy library archive <ref>` (restorable) |
 | "Learn from my recent work" | `poppy mine --json` (invokes the miner agent; can take minutes) |
-| "Sync my machines" | `poppy sync run --json`; automatic sync runs on the timer `poppy sync init` installed (`poppy sync status` shows it). If it exits 2, resolve the conflict it reports |
+| "Sync my machines" | `poppy sync run --json`; automatic sync runs on the timer `poppy sync init` installed (`poppy sync status` shows it). If it exits 2, resolve the conflict it reports. If the timer shows `offline`, the scheduler cannot see the credentials: point `sync.env_file` at a readable `KEY=value` file (machine-local) and re-run `poppy sync init` |
 | "Share this skill" | `poppy publish <name> --to <checkout>`, review the warnings, then `--commit [--push]` only after approval |
 | "Update Poppy" | `poppy update --check` first; then `poppy update` (handles pipx, Homebrew, pip, and checkout installs; refreshes the builtin skills) |
 | "Uninstall Poppy" | `poppy purge` prints the plan; `poppy purge --yes` applies it, `--keep-data` keeps the library. Only after an explicit, informed decision |
