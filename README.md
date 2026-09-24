@@ -25,7 +25,7 @@ Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
 
 - Python 3.10+ (standard library only — nothing to pip install)
 - An agent CLI that can run headlessly, for scheduled mining and skill authoring
-- Git is optional (only for your own versioning of the repo)
+- Git (optional; only needed for multi-machine sync)
 
 Works on Linux and macOS. Windows is untested.
 
@@ -49,6 +49,10 @@ weekly scheduler ──▶ miner agent ──▶ candidates ──▶ validation
 
 The miner explores transcripts through `poppy sessions list/search/read` (one deterministic interface for every harness) and writes candidates with verified quotes. Poppy validates schema, evidence, secrets, and duplicates. Accepting a **skill** runs a writer agent that turns the candidate into a spec-compliant `SKILL.md`; accepting a **memory** or **rule** writes a scoped entry directly. Everything Poppy manages lives in `~/.poppy/library` — never mixed into your own skills or context files. Skills are mirrored into the skill directories you configure; memories and rules are surfaced on demand via `poppy context`. A deterministic decay scan proposes stale entries for archive; nothing is removed without your approval.
 
+## Multi-machine
+
+`~/.poppy` can be one private git repo shared by all your machines. `poppy sync init --remote <private-repo-url>` tracks the library, the candidate queue, and clean rejections; machine-local state (config, sources, mirrors, usage, logs) stays out. `poppy sync run` commits, pulls, pushes, then reconciles skill mirrors and regenerates the memory digest. It soft-fails offline and retries; conflicts are surfaced for you to resolve, never auto-merged. With sync enabled, `poppy schedule install` also installs a frequent sync timer (default every 30 minutes). Run the installer prompt on each machine with the same remote URL.
+
 ## Commands
 
 ```
@@ -65,6 +69,7 @@ poppy library list|show|verify|pin|unpin|archive|restore|adopt
 poppy decay             scan for stale entries; resolve in the UI
 poppy doctor [--agent]  verify the installation
 poppy schedule install|status|uninstall
+poppy sync init|run|status           private-repo sync across machines
 poppy status            summary
 ```
 

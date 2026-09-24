@@ -12,6 +12,7 @@ from . import __version__
 from . import decay as decay_mod
 from . import digest
 from . import library
+from . import sync as sync_mod
 from .candidates import list_candidates, load_candidate
 from .config import (
     get_dotted,
@@ -172,12 +173,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--agent", action="store_true", help="also test the configured agent commands")
     p.add_argument("--json", action="store_true")
 
-    p = sub.add_parser("schedule", help="manage the mining schedule")
+    p = sub.add_parser("schedule", help="manage the mining and sync schedules")
     ssub = p.add_subparsers(dest="schedule_command", required=True)
     si = ssub.add_parser("install")
     si.add_argument("--dry-run", action="store_true")
     ssub.add_parser("status")
     ssub.add_parser("uninstall")
+
+    p = sub.add_parser("sync", help="sync the library with a private git remote")
+    ssub = p.add_subparsers(dest="sync_command", required=True)
+    si = ssub.add_parser("init", help="initialize the repo and optionally set the remote")
+    si.add_argument("--remote", help="git remote URL (recommended: an empty private repo)")
+    si.add_argument("--branch", help="branch name (default: main)")
+    si.add_argument("--machine", help="machine name for commits and machine-scoped entries")
+    sr = ssub.add_parser("run", help="commit, pull, push, then materialize")
+    sr.add_argument("--quiet", action="store_true")
+    ss = ssub.add_parser("status", help="show repo, remote, and materialization state")
+    ss.add_argument("--json", action="store_true")
 
     sub.add_parser("status", help="summary of home, queue, and schedule")
     sub.add_parser("selftest", help="run the bundled test suite")
@@ -673,28 +685,120 @@ def cmd_doctor(args, home: Path) -> int:
 
 
 def cmd_schedule(args, home: Path) -> int:
+    cfg = load_config(home)
     if args.schedule_command == "install":
-        result = schedule_install(home, dry_run=args.dry_run)
+        result = schedule_install(home, cfg, dry_run=args.dry_run)
         if args.dry_run:
             print(f"scheduler: {result['kind']}")
             for path, content in result.get("files", {}).items():
                 print(f"\n--- {path} ---\n{content}")
-            if result.get("cron_line"):
-                print(f"\nadd to crontab:\n  {result['cron_line']}")
+            for line in result.get("cron_lines", []):
+                print(f"\nadd to crontab:\n  {line}")
             return 0
         print(f"scheduler: {result['kind']}")
         for path in result.get("files", {}):
             print(f"  {path}")
-        print("enabled: weekly (Mon 09:00, jittered)" if result.get("enabled") else "not enabled")
+        if result.get("enabled"):
+            print("mining:  enabled (weekly, Mon 09:00, jittered)")
+        if result.get("sync_enabled"):
+            print("sync:    enabled (frequent; `poppy sync status` for details)")
+        elif not (cfg.get("sync") or {}).get("enabled"):
+            print("sync:    not enabled (optional — `poppy sync init --remote <url>`)")
         return 0
     if args.schedule_command == "status":
-        status = schedule_status(home)
-        print(f"{'installed' if status.get('installed') else 'not installed'} ({status.get('kind')}): {status.get('detail')}")
+        status = schedule_status(home, cfg)
+        print(f"mining:  {'installed' if status.get('installed') else 'not installed'} ({status.get('kind')}): {status.get('detail')}")
+        sync = status.get("sync") or {}
+        print(f"sync:    {'installed' if sync.get('installed') else 'not installed'}: {sync.get('detail')}")
         return 0
     result = schedule_uninstall(home)
     for path in result.get("removed", []):
         print(f"removed {path}")
     print(f"scheduler: {result['kind']}")
+    return 0
+
+
+def _print_sync_run(result: dict) -> None:
+    if result.get("skipped"):
+        print(f"skipped: {result['skipped']}")
+        return
+    actions = []
+    if result.get("committed"):
+        actions.append("committed local changes")
+    if result.get("pulled"):
+        actions.append("pulled remote changes")
+    if result.get("pushed"):
+        actions.append("pushed")
+    if result.get("offline"):
+        actions.append("offline — will retry next run")
+    if result.get("conflict"):
+        actions.append("CONFLICT — rebase aborted; resolve manually")
+    mirrors = (result.get("materialized") or {}).get("mirrors") or {}
+    for label in ("installed", "updated", "removed"):
+        names = mirrors.get(label) or []
+        if names:
+            actions.append(f"{label} {len(names)} mirror(s)")
+    for error in mirrors.get("errors") or []:
+        actions.append(f"mirror error: {error}")
+    print("sync: " + ("; ".join(actions) if actions else "nothing to do"))
+    if result.get("remote_error"):
+        print(f"remote error: {result['remote_error']}")
+
+
+def _print_sync_status(status: dict) -> None:
+    if not status["initialized"]:
+        print(f"repo:    not initialized ({status['repo']}) — run `poppy sync init`")
+        return
+    print(f"repo:    {status['repo']} (branch {status['branch']})")
+    print(f"remote:  {status['remote'] or '(none — local only)'}")
+    bits = []
+    if status["dirty"]:
+        bits.append("uncommitted changes")
+    if status["ahead"]:
+        bits.append(f"ahead {status['ahead']}")
+    if status["behind"]:
+        bits.append(f"behind {status['behind']}")
+    if status["rebase_in_progress"]:
+        bits.append("rebase in progress — resolve manually")
+    print("state:   " + (" · ".join(bits) if bits else "clean · up to date"))
+    if status.get("last_run"):
+        print(f"last:    {status['last_run']} ({status.get('last_status') or '?'})")
+    mirrors = status.get("mirrors") or {}
+    if mirrors:
+        print(
+            f"mirrors: {mirrors['library']} skill(s) in library · "
+            f"{len(mirrors['not_mirrored'])} not mirrored · {len(mirrors['drifted'])} drifted · "
+            f"{len(mirrors['orphaned'])} orphaned"
+        )
+    print(f"machine: {status['machine']}")
+
+
+def cmd_sync(args, home: Path) -> int:
+    cfg = load_config(home)
+    if args.sync_command == "init":
+        result = sync_mod.init(home, cfg, remote=args.remote, branch=args.branch, machine=args.machine)
+        print(f"repo:    {result['repo']} (branch {result['branch']})")
+        print(f"remote:  {result['remote'] or '(none — local only; add one with `poppy sync init --remote <url>`)'}")
+        _print_sync_run(result)
+        print("next:    `poppy schedule install` enables automatic sync")
+        return 2 if int(result.get("code", 0)) == 2 else 0
+    if args.sync_command == "run":
+        try:
+            result = sync_mod.run(home, cfg)
+        except PoppyError as exc:
+            print(f"poppy sync: {exc}", file=sys.stderr)
+            return 2
+        if args.quiet:
+            if result.get("code") == 2:
+                print(f"poppy sync: {result.get('remote_error') or 'conflict'}", file=sys.stderr)
+        else:
+            _print_sync_run(result)
+        return int(result.get("code", 0))
+    status = sync_mod.status(home, cfg)
+    if args.json:
+        print(json.dumps(status, indent=2))
+        return 0
+    _print_sync_status(status)
     return 0
 
 
@@ -706,7 +810,7 @@ def cmd_status(args, home: Path) -> int:
         key = str(candidate.get("status", "?"))
         counts[key] = counts.get(key, 0) + 1
     sources = load_sources(home)
-    schedule = schedule_status(home)
+    schedule = schedule_status(home, cfg)
     installed = load_manifest(home).get("skills", {})
     library_entries = library.list_entries(home)
     archived = [e for e in library.list_entries(home, include_archived=True) if e.archived]
@@ -725,6 +829,22 @@ def cmd_status(args, home: Path) -> int:
         print(f"decay:     {len(decay_pending)} proposal(s) awaiting review")
     print(f"installed: {len(installed)} skill(s) mirrored")
     print(f"schedule:  {'installed' if schedule.get('installed') else 'not installed'} ({schedule.get('detail')})")
+    sync_state = sync_mod.status(home, cfg)
+    if sync_state.get("initialized"):
+        bits = []
+        if sync_state["dirty"]:
+            bits.append("uncommitted")
+        if sync_state["ahead"]:
+            bits.append(f"ahead {sync_state['ahead']}")
+        if sync_state["behind"]:
+            bits.append(f"behind {sync_state['behind']}")
+        detail = " · ".join(bits) or "up to date"
+        print(
+            f"sync:      {sync_state['remote'] or 'local only'} ({detail}; "
+            f"last {sync_state.get('last_run') or 'never'})"
+        )
+    else:
+        print("sync:      not initialized (optional — `poppy sync init`)")
     print(f"skills:    {', '.join(str(d) for d in (cfg.get('skills_dirs') or [])) or '(none configured)'}")
     return 0
 
@@ -741,7 +861,7 @@ def cmd_selftest(args, home: Path) -> int:
 # --------------------------------------------------------------------------- dispatch
 
 
-REFRESH_COMMANDS = {"accept", "install", "uninstall", "library", "decay", "mine", "init"}
+REFRESH_COMMANDS = {"accept", "install", "uninstall", "library", "decay", "mine", "init", "sync"}
 
 
 def dispatch(args, home: Path) -> int:
@@ -762,6 +882,7 @@ def dispatch(args, home: Path) -> int:
         "ui": cmd_ui,
         "doctor": cmd_doctor,
         "schedule": cmd_schedule,
+        "sync": cmd_sync,
         "status": cmd_status,
         "selftest": cmd_selftest,
     }

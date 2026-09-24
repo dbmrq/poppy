@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V2.5** (skills, memories, rules, decay, materialized memory index). This document is the persistent design and is updated as phases land.
+Status: **V3** (skills, memories, rules, decay, materialized memory index, multi-machine sync). This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -71,6 +71,7 @@ src/poppy/           Python 3 stdlib package (no third-party imports)
   prompts.py         prompt rendering ({{PLACEHOLDER}} substitution)
   doctor.py          environment + installation checks
   schedule.py        systemd user timer | launchd | cron instructions
+  sync.py            multi-machine git sync: commit, pull, push, materialize
   ui.py              review UI server (stdlib http.server, localhost only)
 prompts/miner.md     recurrent judgment: find reusable procedures with evidence
 prompts/writer.md    turn one accepted candidate into a SKILL.md
@@ -99,6 +100,8 @@ state/usage.json     last-used bookkeeping for decay
 logs/                one log per run (mine-*.log, accept-*.log)
 locks/               per-candidate locks (no double writer runs)
 ```
+
+**Sync (V3):** `~/.poppy` itself is the git repo. **Tracked:** `library/`, `candidates/`, and one clean rejection file per rejected candidate (`rejected/<id>.json`) — one file per artifact, so merges are trivial. **Ignored (machine-local):** `config.json`, `sources.json`, `installed.json`, `inbox/`, `drafts/`, `logs/`, `locks/`, `state/`, `context/`, and derived data (`rejected/index.json`, `rejected/invalid-*.json`). The rejection index and the mirrors manifest are local caches rebuilt from synced files.
 
 ### Config (defaults)
 
@@ -132,6 +135,7 @@ locks/               per-candidate locks (no double writer runs)
 | Skill authoring | writer agent, on accept | fresh context; candidate + excerpts + template |
 | Skill quality gates | `poppy` | spec fields, naming, size, secret scan |
 | Installing + tracking skills | `poppy` | explicit dirs + manifest; removable |
+| Multi-machine sync | `poppy sync` | deterministic git operations; conflicts surfaced, never auto-merged |
 | Review/promotion | `poppy ui` | human only |
 
 ## 6. Transcript access: three tiers
@@ -196,6 +200,8 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 | Transcripts rotate away | evidence still available | excerpts are stored with the candidate at validation time |
 | Agent skips loading memories | context not applied | the memory index is materialized into context files (V2.5), so headlines are always visible; full entries are one `poppy library show` away |
 | Schedule never fires | no new candidates | `poppy schedule status` shows the timer; installer fires one run to prove it |
+| Same entry edited on two machines | rebase aborts, both versions stay local | `poppy sync status` shows the divergence; resolve in `~/.poppy` and re-run |
+| Machine offline during sync | local commits stay put | next run pushes them; nothing is lost |
 | UI unavailable | no effect on data | queue is files on disk; CLI can accept/reject/install |
 
 ## 10. Security
@@ -224,7 +230,7 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 
 The digest is regenerated deterministically after every approval, archive, pin, install, and sync; it has hard budgets (20 binding rules, 40 headlines, 8 KB) and drops the least-used entries with a note. The installer wires it into the harness's native include mechanism where one exists, or inserts a delimited managed block (`poppy context wire --file …`), and must prove visibility with `poppy context verify` (a canary headless run). Nothing executes at session time, and there is no per-harness code: delivery is files, placement is installer configuration, and the proof is a passing test. `pin` remains only a decay exemption — "must always apply" is what rules are for.
 
-**V3 — sync + scopes.** One private data repo per user; per-machine inbox namespaces; derived indexes regenerated locally; an automatic sync agent (systemd/launchd) that commits, rebases, pushes, and materializes after every pull. Scopes: user > machine > project > task, resolved at read/install time.
+**V3 — sync + scopes (done).** One private git repo per user, rooted at `~/.poppy`; `poppy sync init --remote <url>` sets it up, `poppy sync run` commits, fetches, rebases, pushes, then materializes locally (skill mirrors reconciled against the library, digest regenerated). Exit codes: 0 = nothing to do, 1 = synced/materialized or a soft remote error to retry, 2 = conflict or hard error. Offline runs soft-fail and push on the next run; conflicts abort the rebase and are surfaced (`poppy sync status`), never auto-merged. `poppy schedule install` also installs a frequent sync timer (default every 30 minutes, `sync.interval_min`) when sync is enabled. Uninstall/archive propagates: the library deletion syncs and other machines remove their mirrors on the next run. The inbox stays local (validated candidates are the shared artifact); usage, mirrors, logs, and indexes are per-machine and rebuilt locally. Project-scope entries can be keyed by git remote (`remote:<url>`) so the same project matches at different paths on different machines.
 
 **V4 — productize.** More sources verified by the installer, packaging, remote UI option, publishing flow from the private library to a public skills repo.
 

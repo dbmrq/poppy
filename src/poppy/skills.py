@@ -20,6 +20,10 @@ __all__ = [
     "restore_skill",
     "mirror_skill",
     "remove_mirrors",
+    "reconcile_mirrors",
+    "skill_tree_hash",
+    "expected_mirrors",
+    "mirrors_current",
     "adopt_installed",
     "load_manifest",
     "save_manifest",
@@ -135,6 +139,19 @@ def _check_mirror_targets(cfg: dict, name: str, managed: dict) -> None:
             )
 
 
+def skill_tree_hash(path: Path) -> str:
+    """Stable hash of a skill directory's contents (relative paths + bytes).
+
+    Used to detect any change to a library skill — SKILL.md or support files —
+    so mirrors can be refreshed and drift reported.
+    """
+    parts = []
+    for file in sorted(p for p in path.rglob("*") if p.is_file() and ".git" not in p.parts):
+        relative = file.relative_to(path).as_posix()
+        parts.append(f"{relative}:{sha(file.read_bytes().decode('utf-8', 'replace'), 16)}")
+    return sha("\n".join(parts), 16)
+
+
 def mirror_skill(home: Path, cfg: dict, name: str) -> list[str]:
     from . import library
 
@@ -181,6 +198,19 @@ def remove_mirrors(home: Path, name: str) -> list[str]:
     return removed
 
 
+def expected_mirrors(name: str, cfg: dict) -> list[str]:
+    """Destination paths for *name* given the current skills_dirs config."""
+    return [str(Path(entry).expanduser() / name) for entry in skills_dir_paths(cfg)]
+
+
+def mirrors_current(name: str, entry: dict, cfg: dict) -> bool:
+    """True when the recorded mirrors match the configured destinations and exist."""
+    recorded = [str(Path(path_text)) for path_text in entry.get("dirs", [])]
+    if sorted(recorded) != sorted(expected_mirrors(name, cfg)):
+        return False
+    return all(Path(path_text).is_dir() for path_text in recorded)
+
+
 # --------------------------------------------------------------------------- install
 
 
@@ -214,7 +244,7 @@ def install_draft(home: Path, cfg: dict, candidate: dict) -> tuple[str, list[str
         "library": str(target),
         "dirs": [],
         "installed_at": now_iso(),
-        "sha": sha(text, 16),
+        "sha": skill_tree_hash(target),
     }
     managed[name] = managed_value
     save_manifest(home, manifest)
@@ -242,7 +272,7 @@ def install_builtin_skill(home: Path, cfg: dict, name: str) -> list[str]:
         "library": str(source),
         "dirs": [],
         "installed_at": now_iso(),
-        "sha": sha((source / "SKILL.md").read_text(encoding="utf-8"), 16),
+        "sha": skill_tree_hash(source),
     }
     save_manifest(home, manifest)
     dirs = mirror_skill(home, cfg, name)
@@ -295,7 +325,7 @@ def restore_skill(home: Path, cfg: dict, name: str) -> list[str]:
         "library": str(destination),
         "dirs": [],
         "installed_at": now_iso(),
-        "sha": sha((destination / "SKILL.md").read_text(encoding="utf-8"), 16),
+        "sha": skill_tree_hash(destination),
     }
     save_manifest(home, manifest)
     dirs = mirror_skill(home, cfg, name)
@@ -332,3 +362,57 @@ def adopt_installed(home: Path, cfg: dict) -> list[str]:
     if adopted:
         save_manifest(home, manifest)
     return adopted
+
+
+def reconcile_mirrors(home: Path, cfg: dict) -> dict:
+    """Make harness mirrors match the library: install, refresh, remove orphans.
+
+    Idempotent and safe: a directory poppy does not manage is never
+    overwritten. Used after a sync pull (and by `poppy sync run`) so a machine
+    materializes whatever arrived from the shared repo.
+    """
+    from . import library
+
+    library.ensure_library(home)
+    manifest = load_manifest(home)
+    managed = manifest.setdefault("skills", {})
+    available = {
+        path.parent.name: path.parent for path in sorted(library.skills_dir(home).glob("*/SKILL.md"))
+    }
+    result: dict = {"installed": [], "updated": [], "removed": [], "errors": []}
+
+    for name in sorted(set(managed) - set(available)):
+        try:
+            remove_mirrors(home, name)
+            managed.pop(name, None)
+            result["removed"].append(name)
+        except PoppyError as exc:
+            result["errors"].append(f"{name}: {exc}")
+
+    for name in sorted(available):
+        source = available[name]
+        tree_sha = skill_tree_hash(source)
+        entry = managed.get(name) or {}
+        if entry.get("sha") == tree_sha and mirrors_current(name, entry, cfg):
+            continue
+        try:
+            if entry:
+                remove_mirrors(home, name)
+            dirs = mirror_skill(home, cfg, name)
+            refreshed = {
+                "candidate": entry.get("candidate"),
+                "title": entry.get("title") or name,
+                "library": str(source),
+                "dirs": dirs,
+                "installed_at": entry.get("installed_at") or now_iso(),
+                "sha": tree_sha,
+            }
+            if entry.get("builtin"):
+                refreshed["builtin"] = True
+            managed[name] = refreshed
+            result["updated" if entry else "installed"].append(name)
+        except PoppyError as exc:
+            result["errors"].append(f"{name}: {exc}")
+
+    save_manifest(home, manifest)
+    return result

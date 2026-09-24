@@ -82,6 +82,20 @@ class TestValidate(unittest.TestCase):
         with self.assertRaises(Exception):
             load_candidate(self.home, candidate["id"])
 
+    def test_rejection_index_rebuilds_from_files(self):
+        candidate, errors, _warnings = validate_raw(raw_candidate(), self.home, {"min_evidence": 1}, self.sources)
+        self.assertIsNotNone(candidate)
+        save_candidate(self.home, candidate)
+        mark_rejected(self.home, candidate, "not useful")
+
+        index_path = self.home / "rejected" / "index.json"
+        self.assertTrue(index_path.is_file())
+        index_path.unlink()  # another machine only pulls the per-file rejections
+
+        _candidate, errors, _warnings = validate_raw(raw_candidate(), self.home, {"min_evidence": 1}, self.sources)
+        self.assertTrue(any("previously rejected" in error for error in errors))
+        self.assertTrue(index_path.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

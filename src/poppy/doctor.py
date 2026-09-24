@@ -13,6 +13,7 @@ from .config import config_path, load_config
 from .schedule import status as schedule_status
 from .skills import load_manifest, skills_dir_paths
 from .sources import load_sources
+from .sync import status as sync_status
 from .util import PoppyError
 
 
@@ -110,10 +111,46 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
             ok, detail = test_agent(role, cfg, home)
             checks.append(Check(f"agent.{role}.test", "ok" if ok else "fail", detail))
 
-    status = schedule_status(home)
+    status = schedule_status(home, cfg)
     checks.append(
         Check("schedule", "ok" if status.get("installed") else "warn", status.get("detail", ""))
     )
+
+    sync_cfg = cfg.get("sync") or {}
+    if sync_cfg.get("enabled"):
+        sync = sync_status(home, cfg)
+        if not sync["initialized"]:
+            checks.append(Check("sync", "fail", "enabled but no repo — run `poppy sync init`"))
+        elif sync["rebase_in_progress"]:
+            checks.append(
+                Check("sync", "fail", f"rebase in progress — resolve manually in {sync['repo']}")
+            )
+        else:
+            bits = [f"remote {sync['remote'] or '(local only)'}"]
+            if sync["dirty"]:
+                bits.append("uncommitted changes")
+            if sync["ahead"]:
+                bits.append(f"ahead {sync['ahead']}")
+            if sync["behind"]:
+                bits.append(f"behind {sync['behind']}")
+            problem = sync["dirty"] or sync["ahead"] or sync["behind"]
+            checks.append(Check("sync", "warn" if problem else "ok", " · ".join(bits)))
+        mirrors = sync.get("mirrors") or {}
+        drift = (
+            len(mirrors.get("not_mirrored") or [])
+            + len(mirrors.get("drifted") or [])
+            + len(mirrors.get("orphaned") or [])
+        )
+        if drift:
+            checks.append(
+                Check("sync:mirrors", "warn", f"{drift} skill(s) out of sync — run `poppy sync run`")
+            )
+        if not (status.get("sync") or {}).get("installed"):
+            checks.append(
+                Check("schedule:sync", "warn", "sync enabled but no sync timer — run `poppy schedule install`")
+            )
+    else:
+        checks.append(Check("sync", "warn", "not configured (optional) — `poppy sync init --remote <url>`"))
 
     counts: dict[str, int] = {}
     for candidate in list_candidates(home):

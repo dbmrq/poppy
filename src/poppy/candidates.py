@@ -76,7 +76,39 @@ def rejected_index_path(home: Path) -> Path:
 
 
 def load_rejection_index(home: Path) -> dict:
-    return load_json(rejected_index_path(home), {}) or {}
+    """Rejection memory, rebuilt locally from one file per rejection.
+
+    ``rejected/index.json`` is a local cache (gitignored): the source of truth
+    is the per-candidate rejection file, which syncs cleanly between machines
+    instead of every machine editing one shared index.
+    """
+    directory = rejected_dir(home)
+    index_path = rejected_index_path(home)
+    files = [
+        path for path in sorted(directory.glob("*.json")) if not path.name.startswith("invalid-")
+    ]
+    newest = max((path.stat().st_mtime for path in files), default=0.0)
+    if index_path.is_file():
+        try:
+            if not files or index_path.stat().st_mtime >= newest:
+                return load_json(index_path, {}) or {}
+        except OSError:
+            pass
+    index: dict = {}
+    for path in files:
+        data = load_json(path, {}) or {}
+        if not isinstance(data, dict) or not data.get("title"):
+            continue
+        rejection = data.get("rejection") or {}
+        index[title_key(str(data["title"]))] = {
+            "id": data.get("id"),
+            "title": data["title"],
+            "reason": rejection.get("reason"),
+            "at": rejection.get("at"),
+            "stage": rejection.get("stage"),
+        }
+    save_json(index_path, index)
+    return index
 
 
 def rejection_reason(home: Path, title: str) -> str | None:
@@ -86,7 +118,11 @@ def rejection_reason(home: Path, title: str) -> str | None:
 
 def mark_rejected(home: Path, cand: dict, reason: str, stage: str = "user") -> None:
     at = now_iso()
-    index = load_rejection_index(home)
+    rejected = dict(cand)
+    rejected["status"] = "rejected"
+    rejected["rejection"] = {"reason": reason, "at": at, "stage": stage}
+    save_json(rejected_dir(home) / f"{cand['id']}.json", rejected)
+    index = load_rejection_index(home)  # rebuilds from files when the cache is stale
     index[title_key(cand["title"])] = {
         "id": cand["id"],
         "title": cand["title"],
@@ -95,10 +131,6 @@ def mark_rejected(home: Path, cand: dict, reason: str, stage: str = "user") -> N
         "stage": stage,
     }
     save_json(rejected_index_path(home), index)
-    rejected = dict(cand)
-    rejected["status"] = "rejected"
-    rejected["rejection"] = {"reason": reason, "at": at, "stage": stage}
-    save_json(rejected_dir(home) / f"{cand['id']}.json", rejected)
     path = candidates_dir(home) / f"{cand['id']}.json"
     if path.exists():
         path.unlink()

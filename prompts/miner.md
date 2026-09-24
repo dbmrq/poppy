@@ -25,7 +25,7 @@ For memories and rules, propose a `scope`:
 
 - `user` — true everywhere (preferences, personal facts). This is the default.
 - `machine` — true on one host (paths, host-specific services, hardware).
-- `project` — true inside one project directory; include `"project": "<absolute path from the session's cwd>"`.
+- `project` — true inside one project. Prefer `"project": "remote:<git remote URL>"` when the session's cwd is inside a git repo with an origin remote (`git -C <cwd> remote get-url origin`) — that matches the project on every machine. Otherwise use `"project": "<absolute path from the session's cwd>"`.
 - `task` — temporary; expires. Use rarely.
 
 When in doubt, prefer the narrower scope.
@@ -57,7 +57,7 @@ One candidate per file, filename ending in `.json`. Exact schema:
   "summary": "what this is and why it is worth keeping (2-5 sentences)",
   "trigger": "when it applies: 'Use when ...' for skills, 'Applies when ...' for facts/rules",
   "scope": "user | machine | project | task   (memories and rules only; default user)",
-  "project": "absolute path (only with scope=project)",
+  "project": "remote:<git url> or absolute path (only with scope=project)",
   "evidence": [
     {
       "source": "<source name>",

@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -100,6 +101,27 @@ class TestCli(unittest.TestCase):
         code, output = self.run_cli("config", "get", "lookback_days")
         self.assertEqual(code, 0)
         self.assertEqual(output.strip(), "7")
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    @mock.patch("poppy.config.detect_skills_dirs", return_value=[])
+    def test_sync_commands(self, _mock_detect):
+        self.run_cli("init")
+
+        code, output = self.run_cli("sync", "status")
+        self.assertEqual(code, 0, output)
+        self.assertIn("not initialized", output)
+
+        code, output = self.run_cli("sync", "init")
+        self.assertEqual(code, 0, output)
+        self.assertIn("repo:", output)
+
+        code, output = self.run_cli("sync", "status")
+        self.assertEqual(code, 0, output)
+        self.assertIn("branch main", output)
+
+        code, output = self.run_cli("sync", "run")
+        self.assertEqual(code, 0, output)
+        self.assertIn("sync:", output)
 
 
 if __name__ == "__main__":

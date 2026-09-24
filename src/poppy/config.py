@@ -22,6 +22,13 @@ DEFAULT_CONFIG = {
         "writer": {"cmd": None, "timeout_sec": 900},
     },
     "ui": {"host": "127.0.0.1", "port": 8788},
+    "sync": {
+        "enabled": False,
+        "remote": "",
+        "branch": "main",
+        "machine": "",
+        "interval_min": 30,
+    },
 }
 
 COMMON_SKILL_DIRS = (
