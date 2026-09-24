@@ -186,10 +186,11 @@ def build_parser() -> argparse.ArgumentParser:
     lr.add_argument("id")
     lsub.add_parser("adopt", help="import V1-installed skills into the library")
 
-    p = sub.add_parser("decay", help="scan for stale entries and propose archives")
+    p = sub.add_parser("decay", help="archive stale entries (restorable from the review queue)")
     p.add_argument("--json", action="store_true")
-    p.add_argument("--resolve", help="resolve a decay proposal by id")
-    p.add_argument("--resolution", choices=("archive", "keep", "pin"))
+    p.add_argument("--dry-run", action="store_true", help="show what would be archived, change nothing")
+    p.add_argument("--resolve", help="resolve a decay card by id")
+    p.add_argument("--resolution", choices=("restore", "archive"))
 
     p = sub.add_parser("ui", help="serve the review UI (localhost by default)")
     p.add_argument("--host", help="bind address (default: ui.host, 127.0.0.1)")
@@ -425,7 +426,7 @@ def cmd_mine(args, home: Path) -> int:
         for item in summary["invalid"]:
             print(f"  ✗ {item['file']}: {'; '.join(item['errors'])}")
         if summary.get("decay"):
-            print(f"  decay: {summary['decay']} proposal(s) to review")
+            print(f"  decay: {summary['decay']} stale entr{'y' if summary['decay'] == 1 else 'ies'} auto-archived (restore or archive in the queue)")
         print(f"log: {summary.get('log', summary['prompt'])}")
         if summary["accepted"]:
             print("review: poppy ui")
@@ -494,7 +495,7 @@ def cmd_reject(args, home: Path) -> int:
     candidate = load_candidate(home, args.id)
     if candidate.get("kind") == "decay":
         raise PoppyError(
-            "decay proposals are resolved with `poppy decay --resolve <id> --resolution archive|keep|pin`"
+            "decay cards are resolved with `poppy decay --resolve <id> --resolution restore|archive`"
         )
     reason = str(args.reason or "").strip() or "rejected in review"
     mark_rejected(home, candidate, reason)
@@ -762,19 +763,17 @@ def cmd_decay(args, home: Path) -> int:
     cfg = load_config(home)
     if args.resolve:
         if not args.resolution:
-            raise PoppyError("--resolve needs --resolution archive|keep|pin")
+            raise PoppyError("--resolve needs --resolution restore|archive")
         print(json.dumps(decay_mod.resolve(home, cfg, args.resolve, args.resolution)))
         return 0
-    proposals = decay_mod.scan(home, cfg)
+    cards = decay_mod.scan(home, cfg, dry_run=args.dry_run)
     if args.json:
-        print(json.dumps(proposals, indent=2))
+        print(json.dumps(cards, indent=2))
         return 0
-    for proposal in proposals:
-        print(f"{proposal['id']}  {proposal['title']} — {proposal['summary']}")
-    print(
-        f"{len(proposals)} proposal(s); resolve with "
-        "`poppy decay --resolve <id> --resolution archive|keep|pin` or in `poppy ui`"
-    )
+    for card in cards:
+        print(f"{card['id']}  {card['title']} — {card['summary']}")
+    verb = "would archive" if args.dry_run else "archived"
+    print(f"{len(cards)} stale entr{'y' if len(cards) == 1 else 'ies'} {verb}; review in `poppy ui` (restore or archive)")
     return 0
 
 
@@ -1096,7 +1095,10 @@ def cmd_status(args, home: Path) -> int:
         f"{kind_counts['rule']} rule(s), {len(archived)} archived"
     )
     if decay_pending:
-        print(f"decay:     {len(decay_pending)} proposal(s) awaiting review")
+        print(
+            f"decay:     {len(decay_pending)} auto-archived entr"
+            f"{'y' if len(decay_pending) == 1 else 'ies'} to review (restore or archive)"
+        )
     print(f"installed: {len(installed)} skill(s) mirrored")
     print(f"schedule:  {'installed' if schedule.get('installed') else 'not installed'} ({schedule.get('detail')})")
     if sync_state.get("initialized"):

@@ -226,13 +226,20 @@ class TestUiDemo(unittest.TestCase):
         self.act("entry_restore", id="memory-vault-creds")
         self.assertIn("memory-vault-creds", [e["id"] for e in self.state()["library"]["memory"]])
 
-    def test_decay_resolution_touches_the_target_entry(self):
-        def target():
-            return next(e for e in self.state()["library"]["memory"] if e["id"] == "memory-openrouter-spend")
+    def test_decay_card_restores_the_entry(self):
+        before = next(e for e in self.state()["archived"] if e["id"] == "memory-openrouter-spend")
+        self.act("resolve_decay", id="decay-4f2a91c3d8", resolution="restore")
+        state = self.state()
+        self.assertNotIn("decay-4f2a91c3d8", [c["id"] for c in state["candidates"]])
+        self.assertNotIn("memory-openrouter-spend", [e["id"] for e in state["archived"]])
+        entry = next(e for e in state["library"]["memory"] if e["id"] == "memory-openrouter-spend")
+        self.assertNotEqual(entry["last_verified"], before["last_verified"])
 
-        before = target()["last_verified"]
-        self.act("resolve_decay", id="decay-4f2a91c3d8", resolution="keep")
-        self.assertNotEqual(target()["last_verified"], before)
+    def test_decay_card_archive_confirms_and_clears(self):
+        self.act("resolve_decay", id="decay-4f2a91c3d8", resolution="archive")
+        state = self.state()
+        self.assertNotIn("decay-4f2a91c3d8", [c["id"] for c in state["candidates"]])
+        self.assertIn("memory-openrouter-spend", [e["id"] for e in state["archived"]])
 
     def test_demo_never_writes_to_the_home(self):
         before = sorted(str(path) for path in self.home.rglob("*"))

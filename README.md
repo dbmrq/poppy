@@ -61,7 +61,7 @@ weekly scheduler ──▶ miner agent ──▶ candidates ──▶ validation
                                                                        `poppy library show <ref>`)
 ```
 
-The miner explores transcripts through `poppy sessions list/search/read` (one deterministic interface for every harness) and writes candidates with verified quotes. Poppy validates schema, evidence, secrets, and duplicates. Accepting a **skill** runs a writer agent that turns the candidate into a spec-compliant `SKILL.md`; accepting a **memory** or **rule** writes a scoped entry directly. Everything Poppy manages lives in `~/.poppy/library` — never mixed into your own skills or context files. Skills are mirrored into the skill directories you configure; memories and rules are surfaced on demand via `poppy context`. A deterministic decay scan proposes stale entries for archive; nothing is removed without your approval.
+The miner explores transcripts through `poppy sessions list/search/read` (one deterministic interface for every harness) and writes candidates with verified quotes. Poppy validates schema, evidence, secrets, and duplicates. Accepting a **skill** draft installs it (library plus your agents' skill directories); accepting a **memory** or **rule** writes a scoped entry directly. Everything Poppy manages lives in `~/.poppy/library` — never mixed into your own skills or context files. Memories and rules are surfaced on demand via `poppy context`. A deterministic decay scan archives entries nobody used or verified for a while; each one gets a card in the review queue to restore or confirm, and nothing is ever deleted.
 
 ## Multi-machine
 
@@ -117,7 +117,7 @@ poppy install <id>      install a validated skill draft (library + mirrors)
 poppy uninstall <name>
 poppy context show|export|wire|unwire|status|verify
 poppy library list|show|verify|pin|unpin|archive|restore|adopt
-poppy decay             scan for stale entries; resolve in the UI
+poppy decay             archive stale entries (undo from the review queue)
 poppy doctor [--agent]  verify the installation
 poppy schedule install|status|uninstall
 poppy sync init|run|status           private-repo sync across machines

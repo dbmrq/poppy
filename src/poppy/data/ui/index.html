@@ -27,8 +27,13 @@
     max-width: 880px; margin: 0 auto; padding: 22px 20px 10px;
     display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
   }
-  .header-tools { display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
-  .header-tools button { font-size: 12.5px; padding: 3px 10px; }
+  .header-tools { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+  button.icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; padding: 0; border-radius: 50%; color: var(--muted);
+  }
+  button.icon:hover { color: var(--fg); border-color: var(--fg); }
+  .status { color: var(--danger); font-size: 12.5px; }
   .brand { font-weight: 650; letter-spacing: .01em; }
   .brand .dot {
     display: inline-block; width: 9px; height: 9px; border-radius: 50%;
@@ -96,6 +101,7 @@
   .legend dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; font-size: 13.5px; }
   .legend dt { font-weight: 600; white-space: nowrap; }
   .legend dd { margin: 0; color: var(--muted); }
+  .legend .paths { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; }
   @media (max-width: 560px) {
     .legend dl { grid-template-columns: 1fr; }
     .legend dd { margin-bottom: 6px; }
@@ -119,26 +125,27 @@
 <header>
   <div class="brand"><span class="dot"></span>poppy</div>
   <div class="header-tools">
-    <span class="meta" id="meta">loading…</span>
-    <button id="legend-toggle" aria-expanded="false">Legend</button>
+    <span class="status" id="status" hidden></span>
+    <button id="legend-toggle" class="icon" aria-expanded="false" aria-label="About these options" title="About these options">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="4.7" r="1" fill="currentColor"/><rect x="7.25" y="6.7" width="1.5" height="5.1" rx=".75" fill="currentColor"/></svg>
+    </button>
   </div>
 </header>
 <main>
   <section class="legend" id="legend" hidden>
     <h3>What the options do</h3>
     <dl>
-      <dt>Write skill</dt><dd>The candidate is a good idea — have the writer agent draft the skill.</dd>
-      <dt>Install</dt><dd>Accept the draft as-is: it joins the library and is mirrored into your agents' skill directories.</dd>
+      <dt>Write skill</dt><dd>The candidate is a good idea — have the writer agent draft the skill. You review the draft next.</dd>
+      <dt>Accept</dt><dd>Put it to work: a skill is installed into your agents' skill directories and the library; a memory or rule becomes active in the library at the chosen scope.</dd>
       <dt>Rewrite…</dt><dd>Ask the writer for a new draft, with an optional note to steer it (what was wrong, what to focus on). The note is kept for the next rewrite.</dd>
       <dt>Reject</dt><dd>No — and don't propose it again. Your reason is remembered (and syncs between machines).</dd>
-      <dt>Accept</dt><dd>Add a memory or rule to the library at the chosen scope (user, machine, or project).</dd>
       <dt>Verify</dt><dd>The entry is still true: resets the staleness clock without needing a use.</dd>
-      <dt>Pin / Unpin</dt><dd>Pinned entries are never proposed for archiving; unpin lets them age again.</dd>
-      <dt>Archive</dt><dd>Stop using an entry (soft delete): it leaves the digest and your agents, but stays restorable below.</dd>
-      <dt>Uninstall</dt><dd>A skill's Archive: remove it from your agents' skill directories (restorable).</dd>
-      <dt>Restore</dt><dd>Bring an archived entry back into use.</dd>
-      <dt>Decay proposal</dt><dd>A stale entry that nobody used or verified for a while: <em>Archive</em> drops it, <em>Keep</em> marks it verified, <em>Pin</em> keeps it protected from future proposals.</dd>
+      <dt>Pin / Unpin</dt><dd>Pinned entries are never archived by decay; unpin lets them age again.</dd>
+      <dt>Archive</dt><dd>Stop using an entry (soft delete): it leaves the digest and your agents, but stays restorable. Archiving a skill also removes it from your agents' skill directories.</dd>
+      <dt>Restore</dt><dd>Bring an archived entry back into use; this also refreshes its staleness clock.</dd>
+      <dt>Decay</dt><dd>Entries nobody used or verified for a while are archived automatically. Each one gets a card in the queue to restore or confirm.</dd>
     </dl>
+    <p class="paths" id="paths"></p>
   </section>
   <div class="demo" id="demo" hidden>Demo mode — mock data; actions do not touch your library.</div>
   <section>
@@ -239,15 +246,14 @@ function decayCard(candidate) {
   const children = [
     el("div", { class: "row" }, [
       el("h3", { text: candidate.title || candidate.id }),
-      badge("decay proposal", "decay"),
+      badge("auto-archived", "decay"),
     ]),
     el("p", { class: "summary", text: candidate.summary || "" }),
     el("p", { class: "src", text: `target: ${candidate.entry_type} · ${candidate.entry_title || candidate.target}` }),
   ];
   children.push(el("div", { class: "actions" }, [
-    el("button", { class: "primary", text: "Archive", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "archive" }) }),
-    el("button", { text: "Keep", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "keep" }) }),
-    el("button", { text: "Pin", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "pin" }) }),
+    el("button", { class: "primary", text: "Restore", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "restore" }) }),
+    el("button", { text: "Archive", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "archive" }) }),
   ]));
   return el("article", { class: "card" }, children);
 }
@@ -332,7 +338,7 @@ function candidateCard(candidate) {
   const rewrite = rewriteBox(candidate);
   if (status === "draft") {
     actions.append(
-      el("button", { class: "primary", text: "Install", onclick: () => act("install", { id: candidate.id }) })
+      el("button", { class: "primary", text: "Accept", onclick: () => act("install", { id: candidate.id }) })
     );
   }
   actions.append(
@@ -355,7 +361,7 @@ function entryRow(entry, archived = false) {
     ops.append(el("button", { text: "Restore", onclick: () => act("entry_restore", { id: entry.id }) }));
   } else if (entry.kind === "skill") {
     ops.append(
-      el("button", { text: "Uninstall", onclick: () => act("entry_archive", { id: entry.id }) })
+      el("button", { class: "danger", text: "Archive", onclick: () => act("entry_archive", { id: entry.id }) })
     );
   } else {
     ops.append(
@@ -417,22 +423,28 @@ function render(state) {
   for (const entry of archived) archivedRoot.append(entryRow(entry, true));
   $("#archived-count").textContent = archived.length ? `· ${archived.length}` : "";
 
-  $("#meta").textContent = `${state.home} · ${(state.skills_dirs || []).map((d) => typeof d === "string" ? d : d.path).join(", ") || "no skills dirs"}`;
+  const dirs = (state.skills_dirs || []).map((d) => typeof d === "string" ? d : d.path).join(", ");
+  $("#paths").textContent = `${state.home} · skills: ${dirs || "none configured"}`;
 }
 
 async function refresh() {
   try {
     const response = await fetch("/api/state");
-    render(await response.json());
+    const state = await response.json();
+    $("#status").hidden = true;
+    render(state);
   } catch (error) {
-    $("#meta").textContent = "connection lost — is `poppy ui` still running?";
+    $("#status").textContent = "connection lost — is `poppy ui` still running?";
+    $("#status").hidden = false;
   }
 }
 
 const legend = $("#legend");
 const legendToggle = $("#legend-toggle");
 try {
-  legend.hidden = (localStorage.getItem("poppy.legend") || "open") === "closed";
+  const seen = localStorage.getItem("poppy.legend.seen");
+  legend.hidden = seen ? localStorage.getItem("poppy.legend") !== "open" : false;
+  if (!seen) localStorage.setItem("poppy.legend.seen", "1");
 } catch (error) {
   legend.hidden = false;
 }

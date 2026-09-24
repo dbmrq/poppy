@@ -182,8 +182,8 @@ def mine(
 
     if cfg.get("decay_scan", True):
         try:
-            proposals = decay.scan(home, cfg)
-            summary["decay"] = len(proposals)
+            cards = decay.scan(home, cfg)
+            summary["decay"] = len(cards)
         except Exception as exc:  # decay must never break a mining run
             summary["decay_error"] = str(exc)
 
@@ -191,7 +191,7 @@ def mine(
         fh.write(
             f"\n\n--- poppy run summary ---\nsessions: {len(sessions)}\n"
             f"accepted: {json.dumps(accepted)}\ninvalid: {json.dumps(invalid)}\n"
-            f"decay proposals: {summary.get('decay', 0)}\n"
+            f"decay auto-archived: {summary.get('decay', 0)}\n"
         )
     return summary
 
@@ -223,7 +223,7 @@ def accept(
     kind = str(candidate.get("kind") or "skill")
 
     if kind == "decay":
-        raise PoppyError("decay proposals are resolved in the review UI (`poppy ui`)")
+        raise PoppyError("decay cards are resolved in the review UI (`poppy ui`)")
     if candidate.get("status") in ("installed", "active"):
         raise PoppyError(f"{candidate_id} is already accepted")
 

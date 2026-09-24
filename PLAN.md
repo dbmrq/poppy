@@ -45,9 +45,11 @@ scheduler (weekly) ──▶ `poppy mine`
         │                 miner writes candidate JSON into the inbox
         │                 poppy validates: schema, evidence quotes, secrets, duplicates
         ▼
-`poppy ui` (localhost) ── install / rewrite / reject candidates
+`poppy ui` (localhost) ── accept / rewrite / reject candidates
         │                 write ─▶ writer agent drafts SKILL.md from evidence
-        │                 draft validated ─▶ install (accept) / rewrite with steering
+        │                 draft validated ─▶ accept (installs the skill)
+        │                 stale entries ─▶ archived automatically,
+        │                                   undo card in the same queue
         ▼
 installed skills ── copied into the configured skills directories
 ```
@@ -269,6 +271,8 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 **V4.10 — release pipeline (done).** Publishing is tag-driven: bump `__version__`, tag `vX.Y.Z`, and the `release` workflow checks the tag against the package version, builds the sdist and wheel, publishes to PyPI with trusted publishing (OIDC — no tokens), renders the Homebrew formula from the sdist's PyPI URL and sha256, and creates a GitHub release with all artifacts. The tap (`dbmrq/homebrew-tap`) keeps `Formula/poppy-ai.rb` current from PyPI with a daily secret-free workflow; `poppy update --check` reports whether a newer version exists (PyPI for pip/pipx installs, upstream commits for checkouts) and `poppy update` applies it; the installer prompt prefers `pipx install poppy-ai` with the git URL as fallback. One-time setup (a PyPI pending trusted publisher and the `dbmrq/homebrew-tap` formula) is documented in `packaging/README.md`.
 
 **V4.11 — a calmer review flow + legend (done).** The review UI was collapsed to three choices per card — install, rewrite, reject: "discard draft" is gone (the CLI keeps `discard` as a primitive for agents), the pending-skill action is "Write skill" (no double accept before Install), and failed/invalid/writer-rejected drafts offer "Rewrite…" instead of a separate retry. `poppy accept <id> --instructions "<what to change>"` (and the rewrite box in the UI) carries reviewer steering into the writer prompt and stores it on the candidate (`writer_instructions`, capped, cleared by an empty note) so the box prefills on the next rewrite. A Legend button in the header explains every option — install/rewrite/reject, scope, verify, pin/unpin, archive, uninstall, restore, decay resolutions — opens by default on a first visit, and remembers the choice per browser.
+
+**V4.12 — one verb per decision; decay by itself (done).** The review vocabulary is collapsed: **Accept** is the single promotion action (a skill draft is installed straight into the library and agent skill dirs; a memory or rule becomes active at the chosen scope), replacing the old accept-then-install split; **Archive** is the single removal action (a skill's "Uninstall" was the same thing, minus a word). Decay is no longer a proposal: `poppy decay` (and the decay scan inside each mining run) archives entries nobody used or verified for `decay_after_days` — pinned entries and builtin skills stay exempt — and leaves one card per archived entry in the same queue; the card is the undo (Restore brings it back and refreshes the clock, Archive confirms and clears it), and restoring from the Archived list also refreshes the clock so decay never bounces an entry back. `poppy decay --dry-run` previews, `--resolve <id> --resolution restore|archive` resolves. The review UI's header is now an info button: the panel explains every option and carries the library/skill paths that used to sit in the header, opens on the first visit only, and remembers the collapsed state per browser.
 
 ### Nice-to-haves (recorded, not yet built)
 

@@ -327,13 +327,14 @@ def _candidates() -> list[dict]:
             "id": "decay-4f2a91c3d8",
             "kind": "decay",
             "status": "pending",
-            "title": "Archive stale memory: OpenRouter spend tuning",
-            "summary": "Not used or verified in 97 days (limit 90).",
+            "title": "Auto-archived memory: OpenRouter spend tuning",
+            "summary": "Unused and unverified for 97 days (limit 90) — archived automatically.",
             "trigger": "Decay review for memory memory-openrouter-spend",
             "target": "memory-openrouter-spend",
             "entry_type": "memory",
             "entry_title": "OpenRouter spend tuning",
             "days_idle": 97,
+            "archived_at": _ts(days=3),
             "created_at": _ts(days=3),
         },
     ]
@@ -453,17 +454,6 @@ def _library() -> list[dict]:
         ),
         _entry(
             "memory",
-            "memory-openrouter-spend",
-            "OpenRouter spend tuning",
-            "machine",
-            machine="eq12",
-            uses=0,
-            last_used=_ts(days=97),
-            last_verified=_ts(days=97),
-            created=_ts(days=140),
-        ),
-        _entry(
-            "memory",
             "memory-melvil-spec",
             "Melvil generates its project from project.yml",
             "project",
@@ -510,6 +500,19 @@ def _archived() -> list[dict]:
             last_used=_ts(days=120),
             last_verified=_ts(days=95),
             created=_ts(days=200),
+        ),
+        _entry(
+            "memory",
+            "memory-openrouter-spend",
+            "OpenRouter spend tuning",
+            "machine",
+            machine="eq12",
+            archived_at=_ts(days=3),
+            uses=0,
+            last_used=_ts(days=97),
+            last_verified=_ts(days=97),
+            created=_ts(days=140),
+            body="Trim the OpenRouter fallback list to the models that actually get used.",
         ),
         _entry(
             "memory",
@@ -611,6 +614,7 @@ class DemoBackend:
                     entry["archived"] = False
                     entry["status"] = "active"
                     entry["archived_at"] = None
+                    entry["last_verified"] = _ts()  # restoring refreshes the decay clock
                     self.archived.remove(entry)
                     self.library.append(entry)
                 return {"ok": True}
@@ -628,10 +632,14 @@ class DemoBackend:
                     (e for e in self.library + self.archived if e["id"] == candidate.get("target")), None
                 )
                 if entry is not None:
-                    if resolution == "keep":
+                    if resolution == "restore":
+                        if entry in self.archived:
+                            entry["archived"] = False
+                            entry["status"] = "active"
+                            entry["archived_at"] = None
+                            self.archived.remove(entry)
+                            self.library.append(entry)
                         entry["last_verified"] = _ts()
-                    elif resolution == "pin":
-                        entry["pinned"] = True
                     elif resolution == "archive" and entry not in self.archived:
                         entry["archived"] = True
                         entry["status"] = "archived"

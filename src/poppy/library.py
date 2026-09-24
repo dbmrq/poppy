@@ -294,6 +294,7 @@ def restore_entry(home: Path, entry: Entry) -> Entry:
         raise PoppyError("restore skills through skills.restore_skill")
     entry.meta.pop("archived_at", None)
     entry.meta["status"] = "active"
+    entry.meta["last_verified"] = now_iso()  # restoring counts as "still true", so decay leaves it alone
     destination = _fact_path(home, entry.kind, entry.scope, entry.id)
     destination.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(destination, dump_frontmatter(entry.meta, entry.body, META_ORDER))
