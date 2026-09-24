@@ -101,11 +101,13 @@ Ask the user for a lookback window (default: 7 days for the first run). Then:
 poppy mine --since 7d
 ```
 
-The miner agent may take several minutes. Report how many candidates were accepted, then point the user at the review UI:
+This invokes the miner agent, which may take several minutes. Candidates can be **skills** (reusable procedures), **memories** (facts and preferences), or **rules** (negative constraints). When it finishes, report how many candidates were accepted, then point the user at the review UI:
 
 ```bash
 poppy ui    # http://127.0.0.1:8788
 ```
+
+In the UI: accepting a skill runs a writer agent and produces a `SKILL.md`; accepting a memory or rule writes a scoped entry into the Poppy library. Nothing is ever written into the user's own skill directories or context files — harness skill directories only receive mirrors of library skills, and memories/rules are surfaced on demand via `poppy context`.
 
 No candidates is an acceptable outcome — say so plainly rather than forcing candidates. If every candidate was rejected as invalid, read `~/.poppy/logs/mine-*.log`, fix the likely cause (usually a source or agent configuration problem), and retry once.
 
@@ -117,7 +119,7 @@ Summarize concisely:
 - agent commands configured (miner, writer)
 - skills directories
 - schedule state
-- how to review the queue (`poppy ui`)
+- how to review the queue (`poppy ui`), how to load memories (`poppy context`)
 - anything that failed or could not be verified
 
 Never claim success for a step you did not verify.
