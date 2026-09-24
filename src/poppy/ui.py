@@ -1,4 +1,4 @@
-"""The local review UI: candidates in, skills out. Localhost only, no credentials."""
+"""The local review UI: candidates in, library entries out. Localhost only."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import decay, library
 from .candidates import (
     drafts_candidate_dir,
     list_candidates,
@@ -17,21 +18,32 @@ from .candidates import (
     save_candidate,
 )
 from .pipeline import accept
-from .skills import install_draft, load_manifest, uninstall_skill
+from .skills import archive_skill, install_draft, restore_skill
 from .util import PoppyError, REPO_ROOT, tail
 
 INDEX_HTML = REPO_ROOT / "ui" / "index.html"
+QUEUE_STATUSES = {"pending", "writing", "draft", "draft_invalid", "draft_failed", "writer_rejected"}
 
 
 def _state(home: Path, cfg: dict) -> dict:
-    candidates = [c for c in list_candidates(home) if c.get("status") != "installed"]
+    candidates = [
+        candidate
+        for candidate in list_candidates(home)
+        if candidate.get("status") in QUEUE_STATUSES or candidate.get("kind") == "decay"
+    ]
     for candidate in candidates:
         draft = drafts_candidate_dir(home, candidate["id"]) / "SKILL.md"
         if draft.is_file():
             candidate["draft_preview"] = draft.read_text(encoding="utf-8", errors="replace")[:20000]
+    usage = library.load_usage(home)
+    grouped: dict[str, list] = {"skill": [], "memory": [], "rule": []}
+    for entry in library.list_entries(home):
+        grouped[entry.kind].append(entry.to_dict(usage))
+    archived = [e.to_dict(usage) for e in library.list_entries(home, include_archived=True) if e.archived]
     return {
         "candidates": candidates,
-        "installed": load_manifest(home).get("skills", {}),
+        "library": grouped,
+        "archived": archived,
         "skills_dirs": cfg.get("skills_dirs", []),
         "home": str(home),
     }
@@ -54,19 +66,26 @@ def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
     if action == "accept":
         candidate_id = str(payload.get("id", ""))
         candidate = load_candidate(home, candidate_id)
-        if candidate.get("status") in ("writing",):
+        kind = str(candidate.get("kind") or "skill")
+        if kind in ("memory", "rule"):
+            result = accept(
+                home,
+                candidate_id,
+                cfg,
+                scope=payload.get("scope"),
+                project=payload.get("project"),
+            )
+            return {"ok": True, **result}
+        if candidate.get("status") == "writing":
             raise PoppyError("a writer run is already in progress for this candidate")
-        thread = threading.Thread(
-            target=_accept_worker, args=(home, cfg, candidate_id), daemon=True
-        )
+        thread = threading.Thread(target=_accept_worker, args=(home, cfg, candidate_id), daemon=True)
         thread.start()
         return {"ok": True, "status": "writing"}
 
     if action == "reject":
         candidate_id = str(payload.get("id", ""))
         reason = str(payload.get("reason") or "rejected in review").strip()
-        candidate = load_candidate(home, candidate_id)
-        mark_rejected(home, candidate, reason)
+        mark_rejected(home, load_candidate(home, candidate_id), reason)
         return {"ok": True}
 
     if action == "discard_draft":
@@ -92,9 +111,43 @@ def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
         return {"ok": True, "name": name, "dirs": dirs}
 
     if action == "uninstall":
-        name = str(payload.get("name", ""))
-        removed = uninstall_skill(home, name)
-        return {"ok": True, "removed": removed}
+        return {"ok": True, "removed": archive_skill(home, str(payload.get("name", "")))}
+
+    if action == "resolve_decay":
+        return {
+            "ok": True,
+            **decay.resolve(
+                home,
+                cfg,
+                str(payload.get("id", "")),
+                str(payload.get("resolution", "")),
+            ),
+        }
+
+    if action == "entry_pin":
+        entry = library.find_entry(home, str(payload.get("id", "")))
+        library.set_pinned(entry, bool(payload.get("pinned", True)))
+        return {"ok": True}
+
+    if action == "entry_verify":
+        library.verify_entry(library.find_entry(home, str(payload.get("id", ""))))
+        return {"ok": True}
+
+    if action == "entry_archive":
+        entry = library.find_entry(home, str(payload.get("id", "")))
+        if entry.kind == "skill":
+            archive_skill(home, entry.id)
+        else:
+            library.archive_entry(home, entry)
+        return {"ok": True}
+
+    if action == "entry_restore":
+        entry = library.find_entry(home, str(payload.get("id", "")))
+        if entry.kind == "skill":
+            dirs = restore_skill(home, cfg, entry.id)
+            return {"ok": True, "dirs": dirs}
+        library.restore_entry(home, entry)
+        return {"ok": True}
 
     raise PoppyError(f"unknown action: {action}")
 

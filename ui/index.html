@@ -24,7 +24,7 @@
     font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   header {
-    max-width: 860px; margin: 0 auto; padding: 22px 20px 10px;
+    max-width: 880px; margin: 0 auto; padding: 22px 20px 10px;
     display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
   }
   .brand { font-weight: 650; letter-spacing: .01em; }
@@ -33,9 +33,10 @@
     background: var(--accent); margin-right: 9px; vertical-align: 1px;
   }
   .meta { color: var(--muted); font-size: 12.5px; }
-  main { max-width: 860px; margin: 0 auto; padding: 0 20px 90px; }
+  main { max-width: 880px; margin: 0 auto; padding: 0 20px 90px; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 30px 0 12px; }
   h2 .count { color: var(--fg); }
+  h3.group { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 18px 0 8px; }
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
     padding: 15px 17px; margin-bottom: 12px;
@@ -49,6 +50,7 @@
   .badge.draft { color: var(--ok); border-color: currentColor; }
   .badge.writing { color: var(--warn); border-color: currentColor; }
   .badge.draft_invalid, .badge.draft_failed, .badge.writer_rejected { color: var(--danger); border-color: currentColor; }
+  .badge.kind { border-color: var(--accent); color: var(--accent); }
   .trigger { color: var(--fg); margin: 10px 0 4px; font-weight: 550; }
   .summary { color: var(--muted); margin: 4px 0 10px; }
   details { margin: 8px 0; }
@@ -66,7 +68,7 @@
   .note { font-size: 13px; margin: 6px 0; }
   .note.warn { color: var(--warn); }
   .note.err { color: var(--danger); }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
   button {
     font: inherit; font-size: 13.5px; border-radius: 8px; padding: 6px 13px; cursor: pointer;
     border: 1px solid var(--border); background: transparent; color: var(--fg);
@@ -74,17 +76,21 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
   button.danger { color: var(--danger); }
   button:disabled { opacity: .5; cursor: default; }
-  .reject-box { display: none; margin-top: 10px; gap: 8px; }
-  .reject-box.open { display: flex; }
-  .reject-box input {
-    flex: 1; font: inherit; font-size: 13.5px; padding: 6px 10px;
+  select, input[type=text] {
+    font: inherit; font-size: 13.5px; padding: 6px 10px;
     border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
   }
+  .reject-box { display: none; margin-top: 10px; gap: 8px; }
+  .reject-box.open { display: flex; }
+  .reject-box input { flex: 1; }
   .empty { color: var(--muted); font-size: 13.5px; }
-  .installed-item { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
-  .installed-item:last-child { border-bottom: none; }
-  .installed-item .name { font-weight: 550; }
-  .installed-item .when { color: var(--muted); font-size: 12.5px; }
+  .entry { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .entry:last-child { border-bottom: none; }
+  .entry .name { font-weight: 550; }
+  .entry .sub { color: var(--muted); font-size: 12.5px; }
+  .entry .ops { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .entry .ops button { font-size: 12.5px; padding: 4px 10px; }
+  .pin { color: var(--accent); font-weight: 600; }
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; margin-right: 7px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
@@ -101,32 +107,35 @@
     <p class="empty" id="queue-empty" hidden>Nothing to review. The next mining run fills this in.</p>
   </section>
   <section>
-    <h2>Installed <span class="count" id="installed-count"></span></h2>
-    <div id="installed"></div>
-    <p class="empty" id="installed-empty" hidden>No poppy-managed skills yet.</p>
+    <h2>Library <span class="count" id="library-count"></span></h2>
+    <div id="library"></div>
+  </section>
+  <section id="archived-section" hidden>
+    <h2>Archived <span class="count" id="archived-count"></span></h2>
+    <div id="archived"></div>
   </section>
 </main>
 <script>
 const $ = (sel) => document.querySelector(sel);
-
 const STATUS_ORDER = ["draft", "writing", "draft_invalid", "draft_failed", "writer_rejected", "pending"];
 const STATUS_LABEL = {
   pending: "candidate", writing: "writing", draft: "draft ready",
   draft_invalid: "draft invalid", draft_failed: "writer failed",
-  writer_rejected: "writer rejected", installed: "installed",
+  writer_rejected: "writer rejected", installed: "installed", active: "active",
 };
+const SCOPES = ["user", "machine", "project", "task"];
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
+    if (value == null) continue;
     if (key === "class") node.className = value;
     else if (key === "text") node.textContent = value;
     else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
     else node.setAttribute(key, value);
   }
   for (const child of [].concat(children)) {
-    if (child == null) continue;
-    node.append(child);
+    if (child != null) node.append(child);
   }
   return node;
 }
@@ -142,12 +151,13 @@ async function act(action, payload) {
   await refresh();
 }
 
-function badge(status) {
-  return el("span", { class: `badge ${status}`, text: STATUS_LABEL[status] || status });
+function badge(text, extraClass = "") {
+  return el("span", { class: `badge ${extraClass}`, text });
 }
 
 function evidenceBlock(candidate) {
   const items = candidate.evidence || [];
+  if (!items.length) return null;
   const children = [el("summary", { text: `Evidence (${items.length})` })];
   for (const item of items) {
     children.push(
@@ -160,22 +170,68 @@ function evidenceBlock(candidate) {
 
 function rejectBox(candidate) {
   const input = el("input", { type: "text", placeholder: "reason (optional)" });
-  const confirm = el("button", {
-    class: "danger", text: "Reject",
-    onclick: () => act("reject", { id: candidate.id, reason: input.value || "rejected in review" }),
-  });
-  const cancel = el("button", {
-    text: "Cancel",
-    onclick: () => box.classList.remove("open"),
-  });
-  const box = el("div", { class: "reject-box" }, [input, confirm, cancel]);
+  const box = el("div", { class: "reject-box" }, [
+    input,
+    el("button", {
+      class: "danger", text: "Reject",
+      onclick: () => act("reject", { id: candidate.id, reason: input.value || "rejected in review" }),
+    }),
+    el("button", { text: "Cancel", onclick: () => box.classList.remove("open") }),
+  ]);
   return box;
 }
 
-function candidateCard(candidate) {
-  const status = candidate.status || "pending";
+function decayCard(candidate) {
   const children = [
-    el("div", { class: "row" }, [el("h3", { text: candidate.title || candidate.id }), badge(status)]),
+    el("div", { class: "row" }, [
+      el("h3", { text: candidate.title || candidate.id }),
+      badge("decay proposal", "writer_rejected"),
+    ]),
+    el("p", { class: "summary", text: candidate.summary || "" }),
+    el("p", { class: "src", text: `target: ${candidate.entry_type} ${candidate.target}` }),
+  ];
+  children.push(el("div", { class: "actions" }, [
+    el("button", { class: "primary", text: "Archive", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "archive" }) }),
+    el("button", { text: "Keep", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "keep" }) }),
+    el("button", { text: "Pin", onclick: () => act("resolve_decay", { id: candidate.id, resolution: "pin" }) }),
+  ]));
+  return el("article", { class: "card" }, children);
+}
+
+function factControls(candidate) {
+  const projectInput = el("input", { type: "text", placeholder: "project path", value: candidate.project || "" });
+  const scopeSelect = el("select", {}, SCOPES.map((scope) =>
+    el("option", { value: scope, text: scope, selected: (candidate.scope || "user") === scope ? "selected" : null })
+  ));
+  projectInput.hidden = (candidate.scope || "user") !== "project";
+  scopeSelect.addEventListener("change", () => { projectInput.hidden = scopeSelect.value !== "project"; });
+  return {
+    node: el("div", { class: "actions" }, [
+      el("span", { class: "sub", text: "scope:" }),
+      scopeSelect,
+      projectInput,
+      el("button", {
+        class: "primary", text: "Accept",
+        onclick: () => act("accept", {
+          id: candidate.id,
+          scope: scopeSelect.value,
+          project: scopeSelect.value === "project" ? projectInput.value : null,
+        }),
+      }),
+    ]),
+    reject: rejectBox(candidate),
+  };
+}
+
+function candidateCard(candidate) {
+  if (candidate.kind === "decay") return decayCard(candidate);
+  const status = candidate.status || "pending";
+  const kind = candidate.kind || "skill";
+  const children = [
+    el("div", { class: "row" }, [
+      el("h3", { text: candidate.title || candidate.id }),
+      el("div", {}, [badge(kind, "kind"), " ", badge(STATUS_LABEL[status] || status, status)]),
+    ]),
   ];
   if (candidate.trigger) children.push(el("p", { class: "trigger", text: candidate.trigger }));
   if (candidate.summary) children.push(el("p", { class: "summary", text: candidate.summary }));
@@ -184,10 +240,8 @@ function candidateCard(candidate) {
   for (const warning of candidate.warnings || []) {
     children.push(el("p", { class: "note warn", text: `⚠ ${warning}` }));
   }
-  if (candidate.draft_errors) {
-    for (const error of candidate.draft_errors) {
-      children.push(el("p", { class: "note err", text: `✗ ${error}` }));
-    }
+  for (const error of candidate.draft_errors || []) {
+    children.push(el("p", { class: "note err", text: `✗ ${error}` }));
   }
   if (candidate.error) children.push(el("p", { class: "note err", text: `✗ ${candidate.error}` }));
   if (candidate.writer_rejection) {
@@ -198,6 +252,12 @@ function candidateCard(candidate) {
       el("summary", { text: "Draft SKILL.md" }),
       el("pre", { text: candidate.draft_preview }),
     ]));
+  }
+
+  if (kind === "memory" || kind === "rule") {
+    const controls = factControls(candidate);
+    children.push(controls.node, controls.reject);
+    return el("article", { class: "card" }, children);
   }
 
   const actions = el("div", { class: "actions" });
@@ -223,37 +283,79 @@ function candidateCard(candidate) {
     );
   }
   children.push(actions, reject);
-
   return el("article", { class: "card" }, children);
+}
+
+function entryRow(entry, archived = false) {
+  const sub = [];
+  if (entry.kind !== "skill") sub.push(entry.scope + (entry.project ? ` · ${entry.project}` : ""));
+  if (entry.pinned) sub.push("pinned");
+  sub.push(`used ${entry.uses || 0}×`);
+  if (entry.last_used) sub.push(`last used ${entry.last_used.slice(0, 10)}`);
+  sub.push(`verified ${(entry.last_verified || "").slice(0, 10) || "?"}`);
+  const ops = el("div", { class: "ops" });
+  if (archived) {
+    ops.append(el("button", { text: "Restore", onclick: () => act("entry_restore", { id: entry.id }) }));
+  } else if (entry.kind === "skill") {
+    ops.append(
+      el("button", { text: "Uninstall", onclick: () => act("entry_archive", { id: entry.id }) })
+    );
+  } else {
+    ops.append(
+      el("button", { text: "Verify", onclick: () => act("entry_verify", { id: entry.id }) }),
+      el("button", {
+        text: entry.pinned ? "Unpin" : "Pin",
+        onclick: () => act("entry_pin", { id: entry.id, pinned: !entry.pinned }),
+      }),
+      el("button", { class: "danger", text: "Archive", onclick: () => act("entry_archive", { id: entry.id }) })
+    );
+  }
+  return el("div", { class: "entry" }, [
+    el("div", {}, [
+      el("div", { class: "name" }, [
+        el("span", { text: entry.title }),
+        entry.pinned ? el("span", { class: "pin", text: " ●" }) : null,
+      ]),
+      el("div", { class: "sub", text: sub.join(" · ") }),
+    ]),
+    ops,
+  ]);
 }
 
 function render(state) {
   const queue = $("#queue");
   queue.replaceChildren();
   const candidates = (state.candidates || []).slice().sort((a, b) => {
-    const order = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
+    const aDecay = a.kind === "decay" ? 1 : 0;
+    const bDecay = b.kind === "decay" ? 1 : 0;
+    const order = aDecay - bDecay || STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
     return order !== 0 ? order : String(b.created_at).localeCompare(String(a.created_at));
   });
   for (const candidate of candidates) queue.append(candidateCard(candidate));
   $("#queue-empty").hidden = candidates.length > 0;
   $("#queue-count").textContent = candidates.length ? `· ${candidates.length}` : "";
 
-  const installed = $("#installed");
-  installed.replaceChildren();
-  const skills = Object.entries(state.installed || {});
-  for (const [name, entry] of skills.sort()) {
-    installed.append(el("div", { class: "installed-item" }, [
-      el("div", {}, [
-        el("div", { class: "name", text: name }),
-        el("div", { class: "when", text: `installed ${entry.installed_at || "?"} · ${(entry.dirs || []).length} dir(s)` }),
-      ]),
-      el("button", { class: "danger", text: "Uninstall", onclick: () => act("uninstall", { name }) }),
-    ]));
+  const libraryRoot = $("#library");
+  libraryRoot.replaceChildren();
+  let total = 0;
+  for (const [kind, label] of [["skill", "Skills"], ["memory", "Memories"], ["rule", "Rules"]]) {
+    const entries = (state.library || {})[kind] || [];
+    total += entries.length;
+    if (!entries.length) continue;
+    libraryRoot.append(el("h3", { class: "group", text: `${label} (${entries.length})` }));
+    for (const entry of entries) libraryRoot.append(entryRow(entry));
   }
-  $("#installed-empty").hidden = skills.length > 0;
-  $("#installed-count").textContent = skills.length ? `· ${skills.length}` : "";
+  if (!total) libraryRoot.append(el("p", { class: "empty", text: "The library is empty. Accepted candidates land here." }));
+  $("#library-count").textContent = total ? `· ${total}` : "";
 
-  $("#meta").textContent = `${state.home} · ${(state.skills_dirs || []).join(", ") || "no skills dirs"}`;
+  const archived = state.archived || [];
+  $("#archived-section").hidden = archived.length === 0;
+  const archivedRoot = $("#archived");
+  archivedRoot.replaceChildren();
+  for (const entry of archived) archivedRoot.append(entryRow(entry, true));
+  $("#archived-count").textContent = archived.length ? `· ${archived.length}` : "";
+
+  $("#meta").textContent = `${state.home} · ${(state.skills_dirs || []).map((d) => typeof d === "string" ? d : d.path).join(", ") || "no skills dirs"}`;
 }
 
 async function refresh() {

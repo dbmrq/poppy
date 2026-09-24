@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V1** (skills only). This document is the persistent design and is updated as phases land.
+Status: **V2** (skills, memories, rules, decay). This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -85,11 +85,17 @@ tests/               fixtures + stdlib unittest
 ```
 config.json          settings (see below)
 sources.json         transcript sources written by the installer
-inbox/               miner output drop directory (validated on the way in)
-candidates/          validated candidates (one JSON file each)
+library/             canonical Poppy-owned content (V2)
+  skills/<name>/     approved skills (SKILL.md + support files)
+  memory/<scope>/    memory entries (one markdown file each)
+  rules/<scope>/     rule entries (negative constraints)
+  archive/           demoted entries, restorable
+candidates/          validated candidates and decay proposals (one JSON file each)
 drafts/<id>/         writer output (SKILL.md + optional supporting files)
+inbox/               miner output drop directory (validated on the way in)
 rejected/            invalid candidates + rejection index (so they are not re-proposed)
-installed.json       manifest of Poppy-installed skills
+installed.json       manifest of Poppy-installed skills and their mirrors
+state/usage.json     last-used bookkeeping for decay
 logs/                one log per run (mine-*.log, accept-*.log)
 locks/               per-candidate locks (no double writer runs)
 ```
@@ -144,30 +150,39 @@ Example configs that are verified against real installations live in `examples/s
 
 ```json
 {
+  "kind": "skill | memory | rule",
   "title": "<= 100 chars",
-  "summary": "what the procedure is and why it is reusable (2-5 sentences)",
-  "trigger": "Use when ...",
+  "summary": "what this is and why it is worth keeping",
+  "trigger": "Use when ... (when it applies)",
+  "scope": "user | machine | project | task   (memories and rules; default user)",
+  "project": "absolute path of the project, for scope=project",
   "evidence": [
     {"source": "opencode", "session": "ses_...", "quote": "verbatim excerpt"}
   ]
 }
 ```
 
-Poppy adds `id`, `status`, `created_at`, and a stored `excerpt` per evidence item (so review and authoring still work after transcripts rotate away). Validation rejects: unknown source/session, unverifiable quotes, high-confidence secrets, duplicates of pending/installed skills or previously rejected candidates.
+`kind` defaults to `skill` for backwards compatibility. Skills must describe a reusable procedure; memories are durable facts or preferences; rules are negative constraints ("never X") that prevent recurring mistakes. Poppy adds `id`, `status`, `created_at`, and a stored `excerpt` per evidence item (so review and authoring still work after transcripts rotate away). Decay proposals are internal candidates with `kind: "decay"` that reference a library entry. Validation rejects: unknown source/session, unverifiable quotes, high-confidence secrets, duplicates of pending/installed entries, and previously rejected proposals.
 
 **Skill** (written by the writer agent, validated by Poppy):
 
 - `SKILL.md` with YAML frontmatter: `name` (kebab-case, matches directory, ≤64 chars) and `description` (≤1024 chars, ideally containing "Use when").
 - Body: concise, imperative, evidence-backed; size-bounded.
-- Installed by copying into each configured `skills_dirs` entry, with provenance in `~/.poppy/installed.json`.
+- Canonical copy in `~/.poppy/library/skills/<name>/`; mirrored into each configured `skills_dirs` entry (copy or symlink) with provenance in `~/.poppy/installed.json`.
+
+**Memory / rule entry** (built deterministically from an accepted candidate):
+
+- Markdown file under `~/.poppy/library/{memory,rules}/<scope>/<id>.md` with frontmatter: `id`, `kind`, `title`, `scope`, `project`/`machine` when relevant, `status`, `pinned`, `created`, `last_verified`, `source_candidate`.
+- Body: the statement, when it applies, and an evidence section with the verified quotes.
+- Surfaced only through `poppy context` (and `poppy library`); Poppy never edits user context files.
 
 ## 8. Promotion UI
 
 `poppy ui` serves a localhost-only review page:
 
-- **Queue** — candidates with title, summary, trigger, evidence excerpts; accept / reject (with reason).
-- **Drafts** — SKILL.md preview after the writer runs; install / discard.
-- **Installed** — Poppy-installed skills with uninstall.
+- **Queue** — candidates with title, summary, trigger, and evidence excerpts. Skills: accept (writer drafts a SKILL.md) or reject. Memories/rules: pick a scope and accept, or reject. Accepting writes directly into the library.
+- **Decay** — proposals to archive entries that have not been used or verified in `decay_after_days`. Resolve with archive / keep / pin. Archiving moves the entry to `library/archive/` and removes its mirrors; nothing is deleted.
+- **Library** — the canonical Poppy-owned content, grouped by kind, with scope, pinned state, and last-verified age. Actions: verify, pin/unpin, archive, and (for skills) uninstall.
 
 Rejected candidates are remembered so the miner is not asked to judge them again.
 
@@ -191,13 +206,25 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 
 ## 11. Roadmap
 
-**V1 — skills (this repo).** Installer prompt, transcript toolbox, miner/writer prompts, candidate pipeline, review UI, scheduler, doctor, tests. Single machine, local state.
+**V1 — skills (done).** Installer prompt, transcript toolbox, miner/writer prompts, candidate pipeline, review UI, scheduler, doctor, tests. Single machine, local state.
 
-**V2 — memory + decay.** The same pipeline with additional destinations: memory entries (on-demand files with an index) and rules (small AGENTS.md additions, negative constraints only). A monthly pass proposes stale entries for archive; nothing is removed without approval.
+**V2 — memories, rules, and decay (done).** Same mining pipeline, three artifact kinds: `skill`, `memory`, `rule`. Accepted memories and rules become entries in the canonical **library** (`~/.poppy/library/`), surfaced to agents through `poppy context` (a builtin `poppy-context` skill teaches agents when to call it). A deterministic decay scan proposes stale entries (unused for `decay_after_days`, default 90) into the same review queue; nothing is archived without approval, pinning exempts an entry, and archives are restorable. Harness copies are *derived mirrors*:
+
+- **Canonical:** `~/.poppy/library/{skills,memory,rules,archive}` — Poppy-owned, one tree, the thing worth backing up or syncing. Never mixed into user skill directories or user context files.
+- **Mirrors:** `skills_dirs` entries may be a path (copy mode) or `{"path": …, "mode": "symlink"}`; the manifest records provenance so `poppy uninstall` removes only Poppy's own copies.
+- **No user-file writes:** Poppy never edits `AGENTS.md`, memory directories, or any file outside `~/.poppy`. Rules are surfaced on demand via `poppy context`; materializing a managed block into AGENTS.md is explicitly deferred (V3+) to avoid entangling user-managed context files — derive such blocks, never sync them.
+- **Usage tracking:** `poppy context` records `last_used` in `~/.poppy/state/usage.json` (state, not library, so library files stay stable under sync).
 
 **V3 — sync + scopes.** One private data repo per user; per-machine inbox namespaces; derived indexes regenerated locally; an automatic sync agent (systemd/launchd) that commits, rebases, pushes, and materializes after every pull. Scopes: user > machine > project > task, resolved at read/install time.
 
 **V4 — productize.** More sources verified by the installer, packaging, remote UI option, publishing flow from the private library to a public skills repo.
+
+### Nice-to-haves (recorded, not yet built)
+
+- **CI on push:** a GitHub Actions workflow running `python3 -m unittest discover -s tests -t .` for every push/PR — cheap insurance for a stdlib-only repo.
+- **Mid-session proposals:** a small `poppy propose` CLI plus a builtin skill so an interactive agent can file a candidate (with evidence) the moment it learns something, instead of waiting for the scheduled miner. Must reuse the same validation (quotes, secrets, dedupe) and land in the same queue.
+- **Miner follow-ups:** track entry usage from transcripts (a skill loaded mid-session is visible in the session JSON) so decay can use real usage rather than age alone.
+- **Packaging:** `pipx`/single-file install, a Homebrew tap, and a `poppy doctor` check for outdated installs.
 
 ## 12. Long game: the seven rules
 

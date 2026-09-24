@@ -8,6 +8,9 @@ from pathlib import Path
 from .sessions import verify_quote
 from .util import PoppyError, load_json, norm_ws, now_iso, save_json, scan_secrets, sha
 
+KIND_VALUES = ("skill", "memory", "rule")
+SCOPE_VALUES = ("user", "machine", "project", "task")
+
 TITLE_MAX = 100
 SUMMARY_MAX = 2000
 TRIGGER_MAX = 500
@@ -45,6 +48,8 @@ def load_candidate(home: Path, cid: str) -> dict:
     data = load_json(candidates_dir(home) / f"{cid}.json")
     if data is None:
         raise PoppyError(f"unknown candidate: {cid}")
+    if isinstance(data, dict):
+        data.setdefault("kind", "skill")
     return data
 
 
@@ -58,6 +63,7 @@ def list_candidates(home: Path, statuses: tuple[str, ...] | None = None) -> list
         data = load_json(path)
         if not isinstance(data, dict):
             continue
+        data.setdefault("kind", "skill")
         if statuses and data.get("status") not in statuses:
             continue
         out.append(data)
@@ -125,6 +131,19 @@ def similar_installed(home: Path, title: str, threshold: float = 0.8) -> str | N
     return None
 
 
+def similar_library(home: Path, title: str, kind: str, threshold: float = 0.87) -> str | None:
+    if kind not in ("memory", "rule"):
+        return None
+    from .library import list_entries
+
+    target = norm_ws(title).lower()
+    for entry in list_entries(home, kinds=(kind,)):
+        other = norm_ws(entry.title).lower()
+        if other and difflib.SequenceMatcher(None, target, other).ratio() >= threshold:
+            return entry.title
+    return None
+
+
 def validate_raw(raw, home: Path, cfg: dict, sources: list) -> tuple[dict | None, list[str], list[str]]:
     """Validate one raw candidate. Returns (candidate, errors, warnings)."""
     errors: list[str] = []
@@ -145,6 +164,19 @@ def validate_raw(raw, home: Path, cfg: dict, sources: list) -> tuple[dict | None
     title = field("title", TITLE_MAX)
     summary = field("summary", SUMMARY_MAX)
     trigger = field("trigger", TRIGGER_MAX)
+
+    kind = str(raw.get("kind") or "skill").strip().lower()
+    if kind not in KIND_VALUES:
+        errors.append(f"unknown kind {kind!r} (expected one of {', '.join(KIND_VALUES)})")
+        kind = "skill"
+    scope = str(raw.get("scope") or "user").strip().lower()
+    project = str(raw.get("project") or "").strip()
+    if kind in ("memory", "rule"):
+        if scope not in SCOPE_VALUES:
+            errors.append(f"invalid scope {scope!r} (expected one of {', '.join(SCOPE_VALUES)})")
+        elif scope == "project" and not project:
+            warnings.append("project scope without a project path; defaulting to user scope")
+            scope = "user"
 
     evidence = raw.get("evidence")
     if not isinstance(evidence, list) or not evidence:
@@ -209,9 +241,13 @@ def validate_raw(raw, home: Path, cfg: dict, sources: list) -> tuple[dict | None
     installed = similar_installed(home, title)
     if installed:
         return None, [f"similar to installed skill: {installed}"], warnings
+    library_similar = similar_library(home, title, kind)
+    if library_similar:
+        return None, [f"similar to existing library entry: {library_similar!r}"], warnings
 
     candidate = {
         "id": cid,
+        "kind": kind,
         "status": "pending",
         "created_at": now_iso(),
         "title": title,
@@ -220,4 +256,8 @@ def validate_raw(raw, home: Path, cfg: dict, sources: list) -> tuple[dict | None
         "evidence": verified,
         "warnings": warnings,
     }
+    if kind in ("memory", "rule"):
+        candidate["scope"] = scope
+        if project:
+            candidate["project"] = project
     return candidate, [], warnings

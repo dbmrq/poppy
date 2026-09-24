@@ -1,4 +1,4 @@
-"""SKILL.md frontmatter parsing, validation, installation, and manifests."""
+"""SKILL.md validation, library installation, harness mirrors, and manifests."""
 
 from __future__ import annotations
 
@@ -7,7 +7,25 @@ import shutil
 from pathlib import Path
 
 from .candidates import drafts_candidate_dir
+from .frontmatter import parse_frontmatter  # re-exported for convenience
 from .util import PoppyError, load_json, now_iso, save_json, scan_secrets, sha
+
+__all__ = [
+    "parse_frontmatter",
+    "validate_skill",
+    "install_draft",
+    "install_builtin_skill",
+    "uninstall_skill",
+    "archive_skill",
+    "restore_skill",
+    "mirror_skill",
+    "remove_mirrors",
+    "adopt_installed",
+    "load_manifest",
+    "save_manifest",
+    "skills_dir_entries",
+    "manifest_path",
+]
 
 NAME_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 NAME_MAX = 64
@@ -15,64 +33,7 @@ DESCRIPTION_MAX = 1024
 BODY_LINE_WARN = 500
 FILE_SIZE_MAX = 64 * 1024
 
-
-def parse_frontmatter(text: str) -> tuple[dict, str, list[str]]:
-    """Parse a minimal YAML frontmatter (strings and folded/literal blocks)."""
-    errors: list[str] = []
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}, text, ["missing frontmatter (file must start with ---)"]
-    end = None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            end = index
-            break
-    if end is None:
-        return {}, text, ["unterminated frontmatter"]
-
-    meta: dict[str, str] = {}
-    index = 1
-    while index < end:
-        line = lines[index]
-        if not line.strip() or line.lstrip().startswith("#"):
-            index += 1
-            continue
-        if line[:1] in (" ", "\t"):
-            errors.append(f"unexpected indented line in frontmatter: {line.strip()!r}")
-            index += 1
-            continue
-        if ":" not in line:
-            errors.append(f"invalid frontmatter line: {line.strip()!r}")
-            index += 1
-            continue
-        key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip()
-        if value in (">", ">-", ">+", "|", "|-", "|+"):
-            fold = value.startswith(">")
-            index += 1
-            block: list[str] = []
-            while index < end:
-                candidate = lines[index]
-                if candidate.strip() and not candidate[:1] in (" ", "\t"):
-                    break
-                block.append(candidate)
-                index += 1
-            indents = [len(item) - len(item.lstrip()) for item in block if item.strip()]
-            cut = min(indents) if indents else 0
-            block = [item[cut:] if item.strip() else "" for item in block]
-            if fold:
-                value = " ".join(item.strip() for item in block if item.strip())
-            else:
-                value = "\n".join(block).strip("\n")
-        else:
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-                value = value[1:-1]
-            index += 1
-        meta[key] = value
-
-    body = "\n".join(lines[end + 1 :]).lstrip("\n")
-    return meta, body, errors
+COPY_IGNORE = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "REJECT.md")
 
 
 def validate_skill(text: str, expected_name: str | None = None) -> tuple[dict, str, list[str], list[str]]:
@@ -99,7 +60,7 @@ def validate_skill(text: str, expected_name: str | None = None) -> tuple[dict, s
         if len(description) > DESCRIPTION_MAX:
             errors.append(f"description longer than {DESCRIPTION_MAX} chars")
         if "use when" not in description.lower():
-            warnings.append("description does not say when to use the skill (\"Use when ...\")")
+            warnings.append('description does not say when to use the skill ("Use when ...")')
 
     if not body.strip():
         errors.append("empty body")
@@ -121,6 +82,9 @@ def validate_skill(text: str, expected_name: str | None = None) -> tuple[dict, s
     return meta, body, errors, warnings
 
 
+# --------------------------------------------------------------------------- manifests
+
+
 def manifest_path(home: Path) -> Path:
     return home / "installed.json"
 
@@ -133,73 +97,237 @@ def save_manifest(home: Path, data: dict) -> None:
     save_json(manifest_path(home), data)
 
 
+def skills_dir_entries(cfg: dict) -> list[tuple[str, str]]:
+    """Resolve skills_dirs config into (path, mode) pairs. Mode: copy | symlink."""
+    out: list[tuple[str, str]] = []
+    default_mode = str(cfg.get("mirror_mode") or "copy")
+    for item in cfg.get("skills_dirs") or []:
+        if isinstance(item, str):
+            out.append((item, default_mode))
+        elif isinstance(item, dict) and item.get("path"):
+            out.append((str(item["path"]), str(item.get("mode") or default_mode)))
+    return out
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+# --------------------------------------------------------------------------- mirrors
+
+
+def _check_mirror_targets(cfg: dict, name: str, managed: dict) -> None:
+    """Refuse to clobber directories that poppy does not manage."""
+    if name in managed:
+        return
+    for entry, _mode in skills_dir_entries(cfg):
+        destination = Path(entry).expanduser() / name
+        if destination.exists() or destination.is_symlink():
+            raise PoppyError(
+                f"{destination} already exists and was not installed by poppy; refusing to overwrite"
+            )
+
+
+def mirror_skill(home: Path, cfg: dict, name: str) -> list[str]:
+    from . import library
+
+    source = library.skills_dir(home) / name
+    if not (source / "SKILL.md").is_file():
+        raise PoppyError(f"skill not in library: {name}")
+    manifest = load_manifest(home)
+    managed = manifest.get("skills", {})
+    dirs: list[str] = []
+    for entry, mode in skills_dir_entries(cfg):
+        root = Path(entry).expanduser()
+        root.mkdir(parents=True, exist_ok=True)
+        destination = root / name
+        if destination.exists() or destination.is_symlink():
+            if name in managed:
+                _remove_path(destination)
+            else:
+                raise PoppyError(
+                    f"{destination} already exists and was not installed by poppy; refusing to overwrite"
+                )
+        if mode == "symlink":
+            destination.symlink_to(source)
+        else:
+            shutil.copytree(source, destination, ignore=COPY_IGNORE)
+        dirs.append(str(destination))
+    return dirs
+
+
+def remove_mirrors(home: Path, name: str) -> list[str]:
+    manifest = load_manifest(home)
+    entry = (manifest.get("skills") or {}).get(name) or {}
+    removed: list[str] = []
+    for path_text in entry.get("dirs", []):
+        path = Path(path_text)
+        if path.is_symlink():
+            path.unlink()
+            removed.append(str(path))
+        elif path.is_dir():
+            skill_md = path / "SKILL.md"
+            if not skill_md.is_file():
+                raise PoppyError(f"refusing to remove {path}: no SKILL.md")
+            meta, _body, _errors = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+            if str(meta.get("name", "")).strip() != name:
+                raise PoppyError(f"refusing to remove {path}: skill name mismatch")
+            shutil.rmtree(path)
+            removed.append(str(path))
+    return removed
+
+
+# --------------------------------------------------------------------------- install
+
+
 def install_draft(home: Path, cfg: dict, candidate: dict) -> tuple[str, list[str]]:
+    from . import library
+
     draft_dir = drafts_candidate_dir(home, candidate["id"])
     skill_md = draft_dir / "SKILL.md"
     if not skill_md.is_file():
         raise PoppyError(f"draft for {candidate['id']} has no SKILL.md")
     text = skill_md.read_text(encoding="utf-8")
-    meta, _body, errors, warnings = validate_skill(text)
+    meta, _body, errors, _warnings = validate_skill(text)
     if errors:
         raise PoppyError("draft failed validation: " + "; ".join(errors))
     name = meta["name"]
 
-    dirs = cfg.get("skills_dirs") or []
-    if not dirs:
-        raise PoppyError("no skills_dirs configured (run the installer prompt or set skills_dirs)")
     manifest = load_manifest(home)
-    managed = manifest.get("skills", {})
-    target_paths: list[str] = []
-    for entry in dirs:
-        target_root = Path(entry).expanduser()
-        target_root.mkdir(parents=True, exist_ok=True)
-        destination = target_root / name
-        if destination.exists():
-            if name in managed:
-                shutil.rmtree(destination)
-            else:
-                raise PoppyError(
-                    f"{destination} already exists and was not installed by poppy; refusing to overwrite"
-                )
-        shutil.copytree(
-            draft_dir,
-            destination,
-            ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "REJECT.md"),
-        )
-        target_paths.append(str(destination))
+    managed = manifest.setdefault("skills", {})
+    _check_mirror_targets(cfg, name, managed)
 
-    managed[name] = {
+    library.ensure_library(home)
+    target = library.skills_dir(home) / name
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True)
+    shutil.copytree(draft_dir, target, dirs_exist_ok=True, ignore=COPY_IGNORE)
+
+    managed_value = {
         "candidate": candidate["id"],
         "title": candidate.get("title", ""),
-        "dirs": target_paths,
+        "library": str(target),
+        "dirs": [],
         "installed_at": now_iso(),
         "sha": sha(text, 16),
     }
+    managed[name] = managed_value
+    save_manifest(home, manifest)
+
+    dirs = mirror_skill(home, cfg, name)
+    managed_value["dirs"] = dirs
+    save_manifest(home, manifest)
+    return name, dirs
+
+
+def install_builtin_skill(home: Path, cfg: dict, name: str) -> list[str]:
+    from . import library
+
+    library.ensure_library(home)
+    source = library.skills_dir(home) / name
+    if not (source / "SKILL.md").is_file():
+        raise PoppyError(f"builtin skill missing from library: {name}")
+    manifest = load_manifest(home)
+    managed = manifest.setdefault("skills", {})
+    _check_mirror_targets(cfg, name, managed)
+    managed[name] = {
+        "candidate": None,
+        "title": "Poppy builtin",
+        "builtin": True,
+        "library": str(source),
+        "dirs": [],
+        "installed_at": now_iso(),
+        "sha": sha((source / "SKILL.md").read_text(encoding="utf-8"), 16),
+    }
+    save_manifest(home, manifest)
+    dirs = mirror_skill(home, cfg, name)
+    managed[name]["dirs"] = dirs
+    save_manifest(home, manifest)
+    return dirs
+
+
+def archive_skill(home: Path, name: str) -> list[str]:
+    """Remove mirrors and move the library copy to the archive (never delete)."""
+    from . import library
+
+    manifest = load_manifest(home)
+    managed = manifest.get("skills", {})
+    removed = remove_mirrors(home, name)
+    library_copy = library.skills_dir(home) / name
+    if library_copy.is_dir():
+        entry = library.Entry(kind="skill", id=name, path=library_copy / "SKILL.md", meta={"name": name}, body="")
+        library.archive_entry(home, entry)
+        removed.append(f"{library_copy} -> archive")
+    managed.pop(name, None)
     manifest["skills"] = managed
     save_manifest(home, manifest)
-    return name, target_paths
+    return removed
 
 
 def uninstall_skill(home: Path, name: str) -> list[str]:
     manifest = load_manifest(home)
-    managed = manifest.get("skills", {})
-    if name not in managed:
+    if name not in (manifest.get("skills") or {}):
         raise PoppyError(f"{name} is not a poppy-managed skill")
-    entry = managed[name]
-    removed = []
-    for path_text in entry.get("dirs", []):
-        path = Path(path_text)
-        if not path.exists():
-            continue
-        skill_md = path / "SKILL.md"
-        if not skill_md.is_file():
-            raise PoppyError(f"refusing to remove {path}: no SKILL.md")
-        meta, _body, _errors = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
-        if str(meta.get("name", "")).strip() != name:
-            raise PoppyError(f"refusing to remove {path}: skill name mismatch")
-        shutil.rmtree(path)
-        removed.append(str(path))
-    del managed[name]
-    manifest["skills"] = managed
+    return archive_skill(home, name)
+
+
+def restore_skill(home: Path, cfg: dict, name: str) -> list[str]:
+    """Move an archived skill back into the library and mirror it again."""
+    from . import library
+
+    source = library.archive_dir(home) / "skills" / name
+    if not (source / "SKILL.md").is_file():
+        raise PoppyError(f"no archived skill named {name}")
+    destination = library.skills_dir(home) / name
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.move(str(source), str(destination))
+    manifest = load_manifest(home)
+    managed = manifest.setdefault("skills", {})
+    managed[name] = {
+        "candidate": None,
+        "title": "restored",
+        "library": str(destination),
+        "dirs": [],
+        "installed_at": now_iso(),
+        "sha": sha((destination / "SKILL.md").read_text(encoding="utf-8"), 16),
+    }
     save_manifest(home, manifest)
-    return removed
+    dirs = mirror_skill(home, cfg, name)
+    managed[name]["dirs"] = dirs
+    save_manifest(home, manifest)
+    return dirs
+
+
+def adopt_installed(home: Path, cfg: dict) -> list[str]:
+    """V1 migration: copy installed mirrors that predate the library into it."""
+    from . import library
+
+    manifest = load_manifest(home)
+    managed = manifest.get("skills", {})
+    library.ensure_library(home)
+    adopted: list[str] = []
+    for name, entry in managed.items():
+        if entry.get("library"):
+            continue
+        source = None
+        for path_text in entry.get("dirs", []):
+            candidate_path = Path(path_text)
+            if (candidate_path / "SKILL.md").is_file():
+                source = candidate_path
+                break
+        if source is None:
+            continue
+        target = library.skills_dir(home) / name
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target, ignore=COPY_IGNORE)
+        entry["library"] = str(target)
+        adopted.append(name)
+    if adopted:
+        save_manifest(home, manifest)
+    return adopted

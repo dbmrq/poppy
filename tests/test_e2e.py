@@ -6,7 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from poppy.candidates import load_candidate  # noqa: E402
+from poppy import library  # noqa: E402
+from poppy.candidates import load_candidate, save_candidate  # noqa: E402
 from poppy.config import load_config, save_config  # noqa: E402
 from poppy.doctor import run_checks  # noqa: E402
 from poppy.pipeline import accept, mine  # noqa: E402
@@ -23,7 +24,8 @@ import os
 import pathlib
 
 inbox = pathlib.Path(os.environ["POPPY_INBOX"])
-candidate = {
+skill = {
+    "kind": "skill",
     "title": "Pin dependencies for reproducible builds",
     "summary": "The widget build failed on CI until the lockfile was frozen. Freezing transitive dependencies makes the build reproducible.",
     "trigger": "Use when a build works locally but fails on CI with dependency drift.",
@@ -35,7 +37,22 @@ candidate = {
         }
     ],
 }
-(inbox / "candidate.json").write_text(json.dumps(candidate), encoding="utf-8")
+memory = {
+    "kind": "memory",
+    "title": "Prefers pinned, reproducible builds",
+    "summary": "Daniel prefers builds to pin all transitive dependencies rather than resolving them at build time.",
+    "trigger": "when configuring package managers or CI builds",
+    "scope": "user",
+    "evidence": [
+        {
+            "source": "fixtures",
+            "session": "session-alpha.jsonl",
+            "quote": "Always pass --frozen-lockfile to the package manager so the widget build is reproducible.",
+        }
+    ],
+}
+(inbox / "skill.json").write_text(json.dumps(skill), encoding="utf-8")
+(inbox / "memory.json").write_text(json.dumps(memory), encoding="utf-8")
 '''
 
 FAKE_WRITER = '''\
@@ -90,32 +107,57 @@ class TestEndToEnd(unittest.TestCase):
     def test_full_loop(self):
         summary = mine(self.home, since_seconds=365 * 86400)
         self.assertEqual(summary["agent_exit"], 0)
-        self.assertEqual(len(summary["accepted"]), 1)
-        candidate_id = summary["accepted"][0]["id"]
+        self.assertEqual(len(summary["accepted"]), 2)
+        accepted = {item["title"]: item["id"] for item in summary["accepted"]}
+        skill_id = accepted["Pin dependencies for reproducible builds"]
+        memory_id = accepted["Prefers pinned, reproducible builds"]
 
-        # a second run re-proposing the same candidate is rejected as a duplicate
+        # a second run re-proposing the same candidates is rejected as duplicates
         second = mine(self.home, since_seconds=365 * 86400)
         self.assertEqual(second["accepted"], [])
+        self.assertEqual(len(second["invalid"]), 2)
         self.assertTrue(
-            any("duplicate" in error for item in second["invalid"] for error in item["errors"])
+            all(
+                any("duplicate" in error for error in item["errors"])
+                for item in second["invalid"]
+            )
         )
 
-        result = accept(self.home, candidate_id)
-        self.assertEqual(result["status"], "draft")
+        # memory: accepted deterministically into the library with user scope
+        memory_result = accept(self.home, memory_id)
+        self.assertEqual(memory_result["status"], "active")
+        memory_entry = library.find_entry(self.home, memory_result["entry"]["id"])
+        self.assertEqual(memory_entry.kind, "memory")
+        self.assertEqual(memory_entry.scope, "user")
 
-        candidate = load_candidate(self.home, candidate_id)
+        context = library.build_context(self.home, self.cfg, mark_used=False)
+        self.assertIn("Prefers pinned, reproducible builds", [e["title"] for e in context["memories"]])
+
+        # skill: writer -> draft -> install
+        result = accept(self.home, skill_id)
+        self.assertEqual(result["status"], "draft")
+        candidate = load_candidate(self.home, skill_id)
         name, _dirs = install_draft(self.home, self.cfg, candidate)
+        candidate["status"] = "installed"
+        save_candidate(self.home, candidate)
         self.assertEqual(name, "frozen-lockfile-builds")
         self.assertTrue((self.skills_dir / name / "SKILL.md").is_file())
+        self.assertTrue((library.skills_dir(self.home) / name / "SKILL.md").is_file())
 
         state = _state(self.home, self.cfg)
-        self.assertIn(name, state["installed"])
+        self.assertIn(name, [entry["id"] for entry in state["library"]["skill"]])
+        self.assertIn(memory_entry.id, [entry["id"] for entry in state["library"]["memory"]])
+        self.assertEqual(state["candidates"], [])
 
         failures = [check for check in run_checks(self.home) if check.status == "fail"]
         self.assertEqual(failures, [], failures)
 
+        # uninstall archives the library copy and removes the mirror
         uninstall_skill(self.home, name)
         self.assertFalse((self.skills_dir / name).exists())
+        self.assertEqual(library.list_entries(self.home, kinds=("skill",)), [])
+        archived = library.list_entries(self.home, kinds=("skill",), include_archived=True)
+        self.assertEqual(len(archived), 1)
 
     def test_dry_run_does_not_invoke_agent(self):
         summary = mine(self.home, since_seconds=365 * 86400, dry_run=True)

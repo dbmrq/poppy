@@ -6,10 +6,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import library
 from .agent import test_agent
 from .candidates import list_candidates
 from .config import config_path, load_config
 from .schedule import status as schedule_status
+from .skills import load_manifest, skills_dir_entries
 from .sources import load_sources
 from .util import PoppyError
 
@@ -57,14 +59,46 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
     dirs = cfg.get("skills_dirs") or []
     if not dirs:
         checks.append(Check("skills_dirs", "fail", "none configured — nothing could be installed"))
-    for entry in dirs:
+    for entry, mode in skills_dir_entries(cfg):
         path = Path(entry).expanduser()
+        label = f"skills_dir:{entry}" + (f" ({mode})" if mode != "copy" else "")
         if path.is_dir():
-            checks.append(Check(f"skills_dir:{entry}", "ok", "exists"))
+            checks.append(Check(label, "ok", "exists"))
         elif path.parent.is_dir():
-            checks.append(Check(f"skills_dir:{entry}", "warn", "missing; created on first install"))
+            checks.append(Check(label, "warn", "missing; created on first install"))
         else:
-            checks.append(Check(f"skills_dir:{entry}", "fail", "parent directory does not exist"))
+            checks.append(Check(label, "fail", "parent directory does not exist"))
+
+    try:
+        entries = library.list_entries(home)
+        kinds: dict[str, int] = {}
+        for entry in entries:
+            kinds[entry.kind] = kinds.get(entry.kind, 0) + 1
+        checks.append(
+            Check(
+                "library",
+                "ok",
+                ", ".join(f"{count} {kind}(s)" for kind, count in sorted(kinds.items())) or "empty",
+            )
+        )
+        if "poppy-context" not in {entry.id for entry in entries}:
+            checks.append(Check("builtin:poppy-context", "warn", "not in library — run `poppy init` to install it"))
+    except PoppyError as exc:
+        checks.append(Check("library", "fail", str(exc)))
+
+    manifest = load_manifest(home)
+    if manifest.get("skills"):
+        missing_library = [
+            name for name, entry in manifest["skills"].items() if not entry.get("library")
+        ]
+        if missing_library:
+            checks.append(
+                Check(
+                    "mirrors",
+                    "warn",
+                    f"{len(missing_library)} skill(s) predate the library; run `poppy library adopt`",
+                )
+            )
 
     for role in ("miner", "writer"):
         cmd = ((cfg.get("agent") or {}).get(role) or {}).get("cmd")

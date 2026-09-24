@@ -7,11 +7,11 @@ import shutil
 import time
 from pathlib import Path
 
+from . import decay, library
 from . import __version__
 from .agent import run_agent
 from .candidates import (
     drafts_candidate_dir,
-    list_candidates,
     load_candidate,
     mark_invalid,
     save_candidate,
@@ -20,7 +20,7 @@ from .candidates import (
 from .config import load_config
 from .prompts import render
 from .sessions import collect_sessions
-from .skills import load_manifest, validate_skill
+from .skills import validate_skill
 from .sources import load_sources, sources_path
 from .util import (
     PoppyError,
@@ -43,13 +43,20 @@ def poppy_cmd() -> str:
     return str(Path(__file__).resolve().parents[2] / "bin" / "poppy")
 
 
-def skills_index(home: Path) -> str:
-    manifest = load_manifest(home)
-    lines = []
-    for name, entry in sorted((manifest.get("skills") or {}).items()):
-        title = entry.get("title") or ""
-        lines.append(f"- {name}" + (f" — {title}" if title else ""))
-    return "\n".join(lines) if lines else "(none yet)"
+def library_index(home: Path) -> str:
+    entries = library.list_entries(home)
+    if not entries:
+        return "(none yet)"
+    lines: list[str] = []
+    for kind in ("skill", "memory", "rule"):
+        subset = [e for e in entries if e.kind == kind]
+        if not subset:
+            continue
+        lines.append(f"### {kind}s")
+        for entry in subset:
+            scope = f" [{entry.scope}]" if entry.kind != "skill" else ""
+            lines.append(f"- {entry.title}{scope}")
+    return "\n".join(lines)
 
 
 def sources_summary(home: Path, sources: list) -> str:
@@ -114,7 +121,7 @@ def mine(
             "MIN_EVIDENCE": cfg.get("min_evidence", 1),
             "INBOX_DIR": str(inbox),
             "POPPY_CMD": poppy_cmd(),
-            "SKILLS_INDEX": skills_index(home),
+            "LIBRARY_INDEX": library_index(home),
             "SOURCES_SUMMARY": sources_summary(home, sources),
         },
     )
@@ -168,17 +175,46 @@ def mine(
 
     summary["accepted"] = accepted
     summary["invalid"] = invalid
+
+    if cfg.get("decay_scan", True):
+        try:
+            proposals = decay.scan(home, cfg)
+            summary["decay"] = len(proposals)
+        except Exception as exc:  # decay must never break a mining run
+            summary["decay_error"] = str(exc)
+
     with open(log_path, "a", encoding="utf-8") as fh:
-        fh.write(f"\n\n--- poppy run summary ---\nsessions: {len(sessions)}\naccepted: {json.dumps(accepted)}\ninvalid: {json.dumps(invalid)}\n")
+        fh.write(
+            f"\n\n--- poppy run summary ---\nsessions: {len(sessions)}\n"
+            f"accepted: {json.dumps(accepted)}\ninvalid: {json.dumps(invalid)}\n"
+            f"decay proposals: {summary.get('decay', 0)}\n"
+        )
     return summary
 
 
-def accept(home: Path, candidate_id: str, config: dict | None = None) -> dict:
+def accept(
+    home: Path,
+    candidate_id: str,
+    config: dict | None = None,
+    scope: str | None = None,
+    project: str | None = None,
+) -> dict:
     ensure_home_layout(home)
     cfg = config or load_config(home)
     candidate = load_candidate(home, candidate_id)
-    if candidate.get("status") == "installed":
-        raise PoppyError(f"{candidate_id} is already installed")
+    kind = str(candidate.get("kind") or "skill")
+
+    if kind == "decay":
+        raise PoppyError("decay proposals are resolved in the review UI (`poppy ui`)")
+    if candidate.get("status") in ("installed", "active"):
+        raise PoppyError(f"{candidate_id} is already accepted")
+
+    if kind in ("memory", "rule"):
+        entry = library.create_fact_entry(home, candidate, scope=scope, project=project)
+        candidate["status"] = "active"
+        candidate["entry"] = entry.id
+        save_candidate(home, candidate)
+        return {"status": "active", "entry": entry.to_dict(library.load_usage(home))}
 
     lock = acquire_lock(home, f"accept-{candidate_id}")
     stamp = time.strftime("%Y%m%d-%H%M%S")

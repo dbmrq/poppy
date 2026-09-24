@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 from . import __version__
+from . import decay as decay_mod
+from . import library
 from .candidates import list_candidates, load_candidate
 from .config import (
     get_dotted,
@@ -21,7 +23,15 @@ from .config import (
 from .doctor import run_checks
 from .pipeline import accept, mine
 from .sessions import collect_sessions, get_session, search_sessions
-from .skills import install_draft, load_manifest, uninstall_skill
+from .skills import (
+    adopt_installed,
+    archive_skill,
+    install_builtin_skill,
+    install_draft,
+    load_manifest,
+    restore_skill,
+    uninstall_skill,
+)
 from .sources import build_source, load_sources, save_sources, sources_path
 from .schedule import install as schedule_install
 from .schedule import status as schedule_status
@@ -116,6 +126,33 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("installed", help="list poppy-managed skills")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("context", help="print memories and rules that apply here")
+    p.add_argument("--cwd", help="directory to resolve project scope for (default: cwd)")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("library", help="inspect and manage the canonical library")
+    lsub = p.add_subparsers(dest="library_command", required=True)
+    ll = lsub.add_parser("list")
+    ll.add_argument("--kind", choices=("skill", "memory", "rule"))
+    ll.add_argument("--archived", action="store_true")
+    ll.add_argument("--json", action="store_true")
+    ls = lsub.add_parser("show")
+    ls.add_argument("id")
+    ls.add_argument("--json", action="store_true")
+    for name in ("verify", "pin", "unpin"):
+        lp = lsub.add_parser(name)
+        lp.add_argument("id")
+    la = lsub.add_parser("archive")
+    la.add_argument("id")
+    lr = lsub.add_parser("restore")
+    lr.add_argument("id")
+    lsub.add_parser("adopt", help="import V1-installed skills into the library")
+
+    p = sub.add_parser("decay", help="scan for stale entries and propose archives")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--resolve", help="resolve a decay proposal by id")
+    p.add_argument("--resolution", choices=("archive", "keep", "pin"))
+
     p = sub.add_parser("ui", help="serve the review UI (localhost only)")
     p.add_argument("--port", type=int)
 
@@ -178,9 +215,23 @@ def cmd_init(args, home: Path) -> int:
     cfg, created = init_config(home, force=args.force)
     if not sources_path(home).exists():
         save_sources(home, [])
+    library.ensure_library(home)
+    created_builtins = library.ensure_builtin_skills(home)
+    mirrored = []
+    for name in created_builtins:
+        if cfg.get("skills_dirs"):
+            try:
+                install_builtin_skill(home, cfg, name)
+                mirrored.append(name)
+            except PoppyError as exc:
+                print(f"note: could not mirror builtin {name}: {exc}")
     print(f"poppy home: {home}")
     print(f"config:     {'written' if created else 'kept'} ({home / 'config.json'})")
     print(f"sources:    {home / 'sources.json'}")
+    print(f"library:    {home / 'library'}")
+    if created_builtins:
+        detail = f" (mirrored: {', '.join(mirrored)})" if mirrored else ""
+        print(f"builtins:   {', '.join(created_builtins)}{detail}")
     if created:
         print("\nnext: configure sources and agent commands, then run `poppy doctor --agent`.")
     return 0
@@ -295,6 +346,8 @@ def cmd_mine(args, home: Path) -> int:
             print(f"  ✓ candidate {item['id']}  {item['title']}")
         for item in summary["invalid"]:
             print(f"  ✗ {item['file']}: {'; '.join(item['errors'])}")
+        if summary.get("decay"):
+            print(f"  decay: {summary['decay']} proposal(s) to review")
         print(f"log: {summary.get('log', summary['prompt'])}")
         if summary["accepted"]:
             print("review: poppy ui")
@@ -334,6 +387,10 @@ def cmd_candidates(args, home: Path) -> int:
 def cmd_accept(args, home: Path) -> int:
     result = accept(home, args.id)
     status = result.get("status")
+    if status == "active":
+        entry = result.get("entry") or {}
+        print(f"accepted {entry.get('kind', 'entry')}: {entry.get('title') or entry.get('id')} (scope: {entry.get('scope')})")
+        return 0
     if status == "draft":
         print(f"draft ready: {result.get('name')} (review with `poppy ui` or `poppy install {args.id}`)")
         return 0
@@ -378,6 +435,137 @@ def cmd_installed(args, home: Path) -> int:
         return 0
     for name, entry in sorted(skills.items()):
         print(f"{name:<40} installed {entry.get('installed_at')}  candidate {entry.get('candidate')}")
+    return 0
+
+
+def cmd_context(args, home: Path) -> int:
+    cfg = load_config(home)
+    cwd = Path(args.cwd).expanduser() if args.cwd else Path.cwd()
+    context = library.build_context(home, cfg, cwd=cwd)
+    if args.json:
+        print(json.dumps(context, indent=2))
+        return 0
+    print(f"# Poppy context — {context['host']} — {context['cwd']}")
+    sections = (
+        ("Rules", context["rules"], True),
+        ("Memories", context["memories"], True),
+        ("Poppy skills", context["skills"], False),
+    )
+    for title, entries, with_summary in sections:
+        if not entries:
+            continue
+        print(f"\n## {title}")
+        for entry in entries:
+            scope = f"[{entry['scope']}] " if with_summary else ""
+            print(f"- {scope}{entry['title']}")
+            if with_summary:
+                summary = (entry.get("body") or "").split("\n\n")[0]
+                if summary:
+                    print(f"  {summary}")
+    if not any(entries for _title, entries, _s in sections):
+        print("\n(no entries yet)")
+    return 0
+
+
+def cmd_library(args, home: Path) -> int:
+    cfg = load_config(home)
+    usage = library.load_usage(home)
+
+    if args.library_command == "list":
+        kinds = (args.kind,) if args.kind else None
+        entries = library.list_entries(home, kinds=kinds, include_archived=args.archived)
+        if args.json:
+            print(json.dumps([entry.to_dict(usage) for entry in entries], indent=2))
+            return 0
+        for entry in sorted(entries, key=lambda e: (e.kind, e.scope, e.title.lower())):
+            flags = []
+            if entry.kind != "skill":
+                flags.append(entry.scope)
+            if entry.archived:
+                flags.append("archived")
+            if entry.pinned:
+                flags.append("pinned")
+            suffix = f"  ({', '.join(flags)})" if flags else ""
+            print(f"{entry.kind:<7} {entry.id:<18} {entry.title}{suffix}")
+        if not entries:
+            print("(library empty)")
+        return 0
+
+    if args.library_command == "show":
+        entry = library.find_entry(home, args.id)
+        data = entry.to_dict(usage)
+        if args.json:
+            print(json.dumps(data, indent=2))
+            return 0
+        print(f"id:            {data['id']}")
+        print(f"kind:          {data['kind']}")
+        print(f"title:         {data['title']}")
+        print(f"scope:         {data['scope']}" + (f" · {data['project']}" if data.get("project") else ""))
+        print(f"status:        {data['status']}{' (archived)' if data['archived'] else ''}")
+        print(f"pinned:        {data['pinned']}")
+        print(f"created:       {data['created']}")
+        print(f"last verified: {data['last_verified']}")
+        print(f"last used:     {data['last_used'] or '-'} ({data['uses']}×)")
+        print(f"path:          {data['path']}")
+        print()
+        print(entry.body)
+        return 0
+
+    if args.library_command == "verify":
+        library.verify_entry(library.find_entry(home, args.id))
+        print(f"verified {args.id}")
+        return 0
+
+    if args.library_command in ("pin", "unpin"):
+        library.set_pinned(library.find_entry(home, args.id), args.library_command == "pin")
+        print(f"{args.library_command} {args.id}")
+        return 0
+
+    if args.library_command == "archive":
+        entry = library.find_entry(home, args.id)
+        if entry.kind == "skill":
+            removed = archive_skill(home, entry.id)
+            print(f"archived skill {entry.id} (removed mirrors: {', '.join(removed) or 'none'})")
+        else:
+            library.archive_entry(home, entry)
+            print(f"archived {entry.id}")
+        return 0
+
+    if args.library_command == "restore":
+        entry = library.find_entry(home, args.id)
+        if entry.kind == "skill":
+            dirs = restore_skill(home, cfg, entry.id)
+            print(f"restored skill {entry.id} (mirrors: {', '.join(dirs) or 'none'})")
+        else:
+            library.restore_entry(home, entry)
+            print(f"restored {entry.id}")
+        return 0
+
+    if args.library_command == "adopt":
+        adopted = adopt_installed(home, cfg)
+        print(f"adopted into library: {', '.join(adopted) if adopted else '(nothing to do)'}")
+        return 0
+
+    return 1
+
+
+def cmd_decay(args, home: Path) -> int:
+    cfg = load_config(home)
+    if args.resolve:
+        if not args.resolution:
+            raise PoppyError("--resolve needs --resolution archive|keep|pin")
+        print(json.dumps(decay_mod.resolve(home, cfg, args.resolve, args.resolution)))
+        return 0
+    proposals = decay_mod.scan(home, cfg)
+    if args.json:
+        print(json.dumps(proposals, indent=2))
+        return 0
+    for proposal in proposals:
+        print(f"{proposal['id']}  {proposal['title']} — {proposal['summary']}")
+    print(
+        f"{len(proposals)} proposal(s); resolve with "
+        "`poppy decay --resolve <id> --resolution archive|keep|pin` or in `poppy ui`"
+    )
     return 0
 
 
@@ -437,12 +625,24 @@ def cmd_status(args, home: Path) -> int:
     sources = load_sources(home)
     schedule = schedule_status(home)
     installed = load_manifest(home).get("skills", {})
+    library_entries = library.list_entries(home)
+    archived = [e for e in library.list_entries(home, include_archived=True) if e.archived]
+    kind_counts = {"skill": 0, "memory": 0, "rule": 0}
+    for entry in library_entries:
+        kind_counts[entry.kind] = kind_counts.get(entry.kind, 0) + 1
+    decay_pending = [c for c in candidates if c.get("kind") == "decay"]
     print(f"home:      {home}")
     print(f"sources:   {', '.join(s.name for s in sources) or '(none)'}")
     print(f"queue:     " + (", ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "(empty)"))
-    print(f"installed: {len(installed)} skill(s)")
+    print(
+        f"library:   {kind_counts['skill']} skill(s), {kind_counts['memory']} memory entry(ies), "
+        f"{kind_counts['rule']} rule(s), {len(archived)} archived"
+    )
+    if decay_pending:
+        print(f"decay:     {len(decay_pending)} proposal(s) awaiting review")
+    print(f"installed: {len(installed)} skill(s) mirrored")
     print(f"schedule:  {'installed' if schedule.get('installed') else 'not installed'} ({schedule.get('detail')})")
-    print(f"skills:    {', '.join(cfg.get('skills_dirs') or []) or '(none configured)'}")
+    print(f"skills:    {', '.join(str(d) for d in (cfg.get('skills_dirs') or [])) or '(none configured)'}")
     return 0
 
 
@@ -470,6 +670,9 @@ def dispatch(args, home: Path) -> int:
         "install": cmd_install,
         "uninstall": cmd_uninstall,
         "installed": cmd_installed,
+        "context": cmd_context,
+        "library": cmd_library,
+        "decay": cmd_decay,
         "ui": cmd_ui,
         "doctor": cmd_doctor,
         "schedule": cmd_schedule,

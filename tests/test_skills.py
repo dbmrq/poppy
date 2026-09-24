@@ -110,7 +110,7 @@ class TestInstall(unittest.TestCase):
         install_draft(self.home, self.cfg, self.candidate)
 
         removed = uninstall_skill(self.home, name)
-        self.assertEqual(len(removed), 1)
+        self.assertGreaterEqual(len(removed), 1)
         self.assertFalse((self.skills_dir / name).exists())
         self.assertNotIn(name, load_manifest(self.home)["skills"])
 

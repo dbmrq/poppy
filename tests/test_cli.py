@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -30,7 +31,8 @@ class TestCli(unittest.TestCase):
             code = main(list(argv))
         return code, output.getvalue()
 
-    def test_init_sources_sessions_mine_status(self):
+    @mock.patch("poppy.config.detect_skills_dirs", return_value=[])
+    def test_init_sources_sessions_mine_status(self, _mock_detect):
         code, _ = self.run_cli("init")
         self.assertEqual(code, 0)
 
@@ -62,7 +64,17 @@ class TestCli(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn("fixtures", output)
 
-    def test_config_set_get(self):
+        code, output = self.run_cli("library", "list")
+        self.assertEqual(code, 0, output)
+
+        code, output = self.run_cli("context")
+        self.assertEqual(code, 0, output)
+
+        code, output = self.run_cli("decay")
+        self.assertEqual(code, 0, output)
+
+    @mock.patch("poppy.config.detect_skills_dirs", return_value=[])
+    def test_config_set_get(self, _mock_detect):
         self.run_cli("init")
         code, _ = self.run_cli("config", "set", "lookback_days", "7")
         self.assertEqual(code, 0)

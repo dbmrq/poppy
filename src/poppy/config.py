@@ -14,6 +14,9 @@ DEFAULT_CONFIG = {
     "max_candidates_per_run": 5,
     "max_sessions_per_run": 500,
     "min_evidence": 1,
+    "decay_after_days": 90,
+    "decay_scan": True,
+    "mirror_mode": "copy",
     "skills_dirs": [],
     "agent": {
         "miner": {"cmd": None, "timeout_sec": 1800},
