@@ -32,15 +32,20 @@ When in doubt, prefer the narrower scope.
 
 ## What qualifies (be severe — the default answer is no)
 
-- Evidence: exact quotes from the sessions. Quotes are verified mechanically against the transcripts; a candidate whose quote cannot be found is discarded before any human sees it.
-- Prefer things that appear at least {{MIN_EVIDENCE}} time(s), or a single hard-won discovery that is clearly durable. Say why in the summary.
+The bar: **could a capable agent work this out in a few minutes on its own?** If yes, leave it out. Repo conventions visible in the code, documented library/framework behavior, standard tool usage, and anything the project's own docs state are all things the next agent can find by reading — keeping them only burns context and review time.
+
+- It must have **cost an agent real work to learn**: a failed attempt, a user correction, a non-obvious flag, an environment quirk, or a discovery that took several turns. If the answer arrived immediately and cleanly, that is not a discovery.
+- As a default: if the session does not show **at least about three turns of real work** (a wrong attempt, a correction, or a dead end before it clicked), do not propose it — no matter how true it is.
+- Evidence: exact quotes from the sessions. Quotes are verified mechanically against the transcripts; a candidate whose quote cannot be found is discarded before any human sees it. Prefer a quote that shows the *cost* (the mistake, the correction, the dead end), not one that merely states the conclusion.
+- Prefer things that appear at least {{MIN_EVIDENCE}} time(s), or the single hard-won discovery described above. Say why in the summary.
 - A rule is only worth keeping if breaking it actually caused a problem you can quote.
 
 ## What does not qualify
 
 - One-off task details, chat noise, secrets, credentials, tokens, personal data.
-- Anything a capable agent already knows or can derive in seconds.
+- Anything a capable agent already knows or can derive in seconds (see the bar above).
 - Anything already covered by the library index below (only add something genuinely new).
+- Summaries of work that succeeded on the first try, status reports, and restatements of the user's request.
 
 ## Output
 
@@ -70,6 +75,7 @@ One candidate per file, filename ending in `.json`. Exact schema:
 
 Rules:
 
+- The `summary` is what future agents read *instead of* the evidence: one self-contained paragraph in your own words (what to do or believe, and why). Do not paste quotes into it — the quotes belong in `evidence`, which stays in Poppy for provenance.
 - Quotes must be verbatim — whitespace differences are tolerated, paraphrases are not. Keep each under 2000 characters, long enough to be unique (roughly 1-3 sentences).
 - `source` and `session` must come from the listings above. Never invent them.
 - Write valid JSON, no markdown fences. Keep each file under 8 KB.

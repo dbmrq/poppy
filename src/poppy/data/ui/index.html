@@ -230,6 +230,8 @@
 </main>
 <script>
 const $ = (sel) => document.querySelector(sel);
+const openDetails = new Set();   // keys of <details> the user expanded (survives re-renders)
+const boxState = new Map();      // per-card box state: open + typed value (survives re-renders)
 const STATUS_ORDER = ["draft", "writing", "draft_invalid", "draft_failed", "writer_rejected", "pending"];
 const STATUS_LABEL = {
   pending: "candidate", writing: "writing", draft: "draft ready",
@@ -280,39 +282,73 @@ function elapsedSince(iso) {
 function evidenceBlock(candidate) {
   const items = candidate.evidence || [];
   if (!items.length) return null;
-  const children = [el("summary", { text: `Evidence (${items.length})` })];
+  const children = [];
   for (const item of items) {
     children.push(
       el("div", { class: "src", text: `${item.source} · ${item.session}` }),
       el("blockquote", { text: item.quote })
     );
   }
-  return el("details", {}, children);
+  return detailsBlock(`evidence:${candidate.id}`, `Evidence (${items.length})`, ...children);
+}
+
+function detailsBlock(key, summaryText, ...children) {
+  const details = el("details", {}, [el("summary", { text: summaryText }), ...children]);
+  if (openDetails.has(key)) details.open = true;
+  details.addEventListener("toggle", () => {
+    if (details.open) openDetails.add(key);
+    else openDetails.delete(key);
+  });
+  return details;
+}
+
+function boxStateFor(key) {
+  if (!boxState.has(key)) boxState.set(key, { open: false, value: "" });
+  return boxState.get(key);
+}
+
+function openBox(box, key) {
+  boxStateFor(key).open = true;
+  box.classList.add("open");
 }
 
 function rejectBox(candidate) {
+  const state = boxStateFor(`reject:${candidate.id}`);
   const input = el("input", { type: "text", placeholder: "reason (optional)" });
-  const box = el("div", { class: "reject-box" }, [
+  input.value = state.value;
+  input.addEventListener("input", () => { state.value = input.value; });
+  const box = el("div", { class: `reject-box${state.open ? " open" : ""}` }, [
     input,
     el("button", {
       class: "danger", text: "Reject",
       onclick: () => act("reject", { id: candidate.id, reason: input.value || "rejected in review" }),
     }),
-    el("button", { text: "Cancel", onclick: () => box.classList.remove("open") }),
+    el("button", {
+      text: "Cancel",
+      onclick: () => { state.open = false; box.classList.remove("open"); },
+    }),
   ]);
   return box;
 }
 
 function rewriteBox(candidate) {
+  const state = boxStateFor(`rewrite:${candidate.id}`);
   const input = el("textarea", { rows: "2", placeholder: "optional: what should change (the writer follows it)" });
-  input.value = candidate.writer_instructions || "";
-  const box = el("div", { class: "rewrite-box" }, [
+  input.value = state.value || candidate.writer_instructions || "";
+  input.addEventListener("input", () => { state.value = input.value; });
+  const box = el("div", { class: `rewrite-box${state.open ? " open" : ""}` }, [
     input,
     el("button", {
       class: "primary", text: "Rewrite",
-      onclick: () => act("accept", { id: candidate.id, instructions: input.value }),
+      onclick: () => {
+        state.open = false;
+        act("accept", { id: candidate.id, instructions: input.value });
+      },
     }),
-    el("button", { text: "Cancel", onclick: () => box.classList.remove("open") }),
+    el("button", {
+      text: "Cancel",
+      onclick: () => { state.open = false; box.classList.remove("open"); },
+    }),
   ]);
   return box;
 }
@@ -334,12 +370,20 @@ function decayCard(candidate) {
 }
 
 function factControls(candidate) {
-  const projectInput = el("input", { type: "text", placeholder: "project path", value: candidate.project || "" });
+  const state = boxStateFor(`controls:${candidate.id}`);
+  const scopeValue = state.scope || candidate.scope || "user";
+  state.scope = scopeValue;
+  const projectInput = el("input", { type: "text", placeholder: "project path" });
+  projectInput.value = state.project != null ? state.project : (candidate.project || "");
   const scopeSelect = el("select", {}, SCOPES.map((scope) =>
-    el("option", { value: scope, text: scope, selected: (candidate.scope || "user") === scope ? "selected" : null })
+    el("option", { value: scope, text: scope, selected: scopeValue === scope ? "selected" : null })
   ));
-  projectInput.hidden = (candidate.scope || "user") !== "project";
-  scopeSelect.addEventListener("change", () => { projectInput.hidden = scopeSelect.value !== "project"; });
+  projectInput.hidden = scopeValue !== "project";
+  scopeSelect.addEventListener("change", () => {
+    state.scope = scopeSelect.value;
+    projectInput.hidden = scopeSelect.value !== "project";
+  });
+  projectInput.addEventListener("input", () => { state.project = projectInput.value; });
   const reject = rejectBox(candidate);
   const node = el("div", {}, [
     el("div", { class: "scope-row" }, [
@@ -356,7 +400,10 @@ function factControls(candidate) {
           project: scopeSelect.value === "project" ? projectInput.value : null,
         }),
       }),
-      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") }),
+      el("button", {
+        class: "danger", text: "Reject",
+        onclick: () => openBox(reject, `reject:${candidate.id}`),
+      }),
     ]),
   ]);
   return { node, reject };
@@ -387,10 +434,9 @@ function candidateCard(candidate) {
     children.push(el("p", { class: "note warn", text: `Writer declined: ${candidate.writer_rejection}` }));
   }
   if (candidate.draft_preview) {
-    children.push(el("details", {}, [
-      el("summary", { text: "Draft SKILL.md" }),
-      el("pre", { text: candidate.draft_preview }),
-    ]));
+    children.push(
+      detailsBlock(`draft:${candidate.id}`, "Draft SKILL.md", el("pre", { text: candidate.draft_preview }))
+    );
   }
 
   if (kind === "memory" || kind === "rule") {
@@ -404,7 +450,10 @@ function candidateCard(candidate) {
   if (status === "pending") {
     actions.append(
       el("button", { class: "primary", text: "Write skill", onclick: () => act("accept", { id: candidate.id }) }),
-      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
+      el("button", {
+        class: "danger", text: "Reject",
+        onclick: () => openBox(reject, `reject:${candidate.id}`),
+      })
     );
     children.push(actions, reject);
     return el("article", { class: "card" }, children);
@@ -424,8 +473,11 @@ function candidateCard(candidate) {
     );
   }
   actions.append(
-    el("button", { text: "Rewrite", onclick: () => rewrite.classList.add("open") }),
-    el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
+    el("button", { text: "Rewrite", onclick: () => openBox(rewrite, `rewrite:${candidate.id}`) }),
+    el("button", {
+      class: "danger", text: "Reject",
+      onclick: () => openBox(reject, `reject:${candidate.id}`),
+    })
   );
   children.push(actions, rewrite, reject);
   return el("article", { class: "card" }, children);
@@ -461,16 +513,23 @@ function entryRow(entry, archived = false) {
     el("div", { class: "sub", text: sub.join(" · ") }),
   ]);
   if (entry.body) {
-    left.append(el("details", {}, [
-      el("summary", { text: "View" }),
-      el("blockquote", { text: entry.body }),
-    ]));
+    left.append(detailsBlock(`body:${entry.id}`, "View", el("blockquote", { text: entry.body })));
   }
   return el("div", { class: "entry" }, [left, ops]);
 }
 
+function userIsTyping() {
+  const active = document.activeElement;
+  return !!active
+    && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)
+    && !!active.closest("#queue, #library");
+}
+
 function render(state) {
   $("#demo").hidden = !state.demo;
+  renderSettings(state.config);
+  renderMining(state.mining);
+  if (userIsTyping()) return;  // never replace a card while its input has focus
   const queue = $("#queue");
   queue.replaceChildren();
   const candidates = (state.candidates || []).slice().sort((a, b) => {
@@ -506,8 +565,6 @@ function render(state) {
   const dirs = (state.skills_dirs || []).map((d) => typeof d === "string" ? d : d.path).join(", ");
   $("#path-home").textContent = state.home;
   $("#path-skills").textContent = dirs || "none configured";
-  renderSettings(state.config);
-  renderMining(state.mining);
 }
 
 function renderMining(mining) {
@@ -521,6 +578,8 @@ function renderMining(mining) {
   } else if (mining && mining.error) {
     node.textContent = `last mining run failed: ${mining.error}`;
     node.className = "meta-row err";
+  } else if (mining && mining.skipped) {
+    node.textContent = `last check: not due — ${mining.detail || "not enough new sessions"}`;
   } else if (mining && mining.finished_at) {
     node.textContent =
       `last mining run: ${mining.sessions} session(s) · ${mining.accepted} candidate(s) · ` +
@@ -692,42 +751,20 @@ function applyPanel(name, open) {
   toggle.setAttribute("aria-expanded", String(open));
 }
 
-function showPanel(name) {  // opening one closes the other, and remembers both
-  for (const key of Object.keys(PANELS)) {
-    applyPanel(key, key === name);
-    try {
-      localStorage.setItem(`poppy.${key}`, key === name ? "open" : "closed");
-    } catch (error) {
-      /* private mode: just don't remember */
-    }
-  }
+function showPanel(name) {  // opening one closes the other
+  for (const key of Object.keys(PANELS)) applyPanel(key, key === name);
 }
 
 function togglePanel(name) {
   if (!PANELS[name][0].hidden) {
     applyPanel(name, false);
-    try {
-      localStorage.setItem(`poppy.${name}`, "closed");
-    } catch (error) {
-      /* private mode: just don't remember */
-    }
     return;
   }
   showPanel(name);
 }
 
-try {
-  const seen = localStorage.getItem("poppy.legend.seen");
-  let legendOpen = seen ? localStorage.getItem("poppy.legend") === "open" : true;
-  let settingsOpen = localStorage.getItem("poppy.settings") === "open";
-  if (!seen) localStorage.setItem("poppy.legend.seen", "1");
-  if (legendOpen && settingsOpen) settingsOpen = false;  // never both at once
-  applyPanel("legend", legendOpen);
-  applyPanel("settings", settingsOpen);
-} catch (error) {
-  applyPanel("legend", false);
-  applyPanel("settings", false);
-}
+applyPanel("legend", false);  // always start collapsed
+applyPanel("settings", false);
 legendToggle.addEventListener("click", () => togglePanel("legend"));
 settingsToggle.addEventListener("click", () => togglePanel("settings"));
 

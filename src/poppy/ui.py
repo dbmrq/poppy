@@ -28,7 +28,7 @@ from .candidates import (
 from .config import config_path, save_config
 from .demo import DemoBackend
 from .doctor import run_checks
-from .pipeline import accept, discard_draft, mine
+from .pipeline import accept, discard_draft, mine, mine_state, save_mine_state
 from .skills import archive_skill, install_draft, restore_skill
 from .util import DATA_DIR, PoppyError, REPO_ROOT, load_json, now_iso, save_json, tail
 
@@ -74,7 +74,7 @@ def _state(home: Path, cfg: dict) -> dict:
             "fields": settings.fields(cfg),
             "ui_address": f"{cfg.get('ui', {}).get('host', '127.0.0.1')}:{cfg.get('ui', {}).get('port', 8788)}",
         },
-        "mining": _mine_status(home),
+        "mining": mine_state(home),
     }
 
 
@@ -91,35 +91,14 @@ def _accept_worker(home: Path, cfg: dict, candidate_id: str, instructions: str |
             pass
 
 
-def _mine_state_path(home: Path) -> Path:
-    return library.state_dir(home) / "mine.json"
-
-
-def _mine_status(home: Path) -> dict:
-    data = load_json(_mine_state_path(home), {})
-    return data if isinstance(data, dict) else {}
-
-
 def _mine_worker(home: Path, cfg: dict) -> None:
-    started = _mine_status(home).get("started_at")
+    """Run a mining pass; ``pipeline.mine`` records progress and outcome itself."""
     try:
-        summary = mine(home, config=cfg, quiet=True)
-        record = {
-            "running": False,
-            "started_at": started,
-            "finished_at": now_iso(),
-            "sessions": int(summary.get("sessions", 0)),
-            "accepted": len(summary.get("accepted") or []),
-            "invalid": len(summary.get("invalid") or []),
-            "decay": int(summary.get("decay", 0)),
-            "agent_exit": summary.get("agent_exit"),
-            "error": None,
-        }
-        if record["agent_exit"] not in (0, None):
-            record["error"] = f"miner agent exited {record['agent_exit']} — see the run log"
-    except Exception as exc:  # show the reason in the UI instead of losing it
-        record = {"running": False, "started_at": started, "finished_at": now_iso(), "error": str(exc)}
-    save_json(_mine_state_path(home), record)
+        mine(home, config=cfg, quiet=True)
+    except Exception as exc:  # mine() records its own failures; cover pre-run errors too
+        state = mine_state(home)
+        if state.get("running") or not state.get("error"):
+            save_mine_state(home, running=False, finished_at=now_iso(), error=str(exc))
 
 
 def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
@@ -217,9 +196,8 @@ def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
         }
 
     if action == "mine":
-        if _mine_status(home).get("running"):
+        if mine_state(home).get("running"):
             raise PoppyError("a mining run is already in progress")
-        save_json(_mine_state_path(home), {"running": True, "started_at": now_iso()})
         thread = threading.Thread(target=_mine_worker, args=(home, cfg), daemon=True)
         thread.start()
         return {"ok": True, "running": True}

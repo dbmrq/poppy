@@ -35,7 +35,8 @@ JSON.
 
 | The user asks | Run |
 | --- | --- |
-| "What's waiting for review?" | `poppy candidates list --json`; summarize titles + evidence, offer accept/reject |
+| "What's waiting for review?" | `poppy candidates list --json`; summarize titles + evidence, offer accept/reject. After queueing anything yourself, remind the user it waits in the UI (`poppy ui`) |
+| "You just finished hard-won work" | if it passes the bar in the `poppy-propose` skill, capture it without being asked, then tell the user it is waiting for review in `poppy ui` |
 | "Show me candidate X" | `poppy candidates show <id> --json` (includes the draft for skills) |
 | "Accept X" | `poppy accept <id> --json`; if it returns `draft`, show it and `poppy install <id>`; memories/rules become active immediately |
 | "Reject X" | `poppy reject <id> --reason "..."` |

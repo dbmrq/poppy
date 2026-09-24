@@ -112,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="render the prompt without invoking the agent")
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--if-due", action="store_true", help="skip unless enough new sessions accumulated (smart schedule)")
 
     p = sub.add_parser("candidates", help="inspect the candidate queue")
     csub = p.add_subparsers(dest="candidates_command", required=True)
@@ -207,6 +208,11 @@ def build_parser() -> argparse.ArgumentParser:
     ssub = p.add_subparsers(dest="schedule_command", required=True)
     si = ssub.add_parser("install")
     si.add_argument("--dry-run", action="store_true")
+    si.add_argument(
+        "--mine",
+        choices=("daily", "every-other-day", "weekly", "smart", "off"),
+        help="how often the miner runs (persisted to config; smart mines only when enough new sessions accumulate)",
+    )
     ss = ssub.add_parser("status")
     ss.add_argument("--json", action="store_true")
     ssub.add_parser("uninstall")
@@ -408,10 +414,19 @@ def cmd_sessions(args, home: Path) -> int:
 
 def cmd_mine(args, home: Path) -> int:
     since = parse_duration(args.since) if args.since else None
-    summary = mine(home, since_seconds=since, dry_run=args.dry_run, quiet=args.quiet)
+    summary = mine(
+        home,
+        since_seconds=since,
+        dry_run=args.dry_run,
+        quiet=args.quiet,
+        if_due=getattr(args, "if_due", False),
+    )
     if args.json:
         print(json.dumps(summary, indent=2))
         return 0 if summary.get("agent_exit", 0) == 0 else 1
+    if summary.get("skipped"):
+        print(f"not due: {summary.get('detail')}")
+        return 0
     if summary.get("dry_run"):
         print(f"dry run: {summary['sessions']} session(s) in the lookback window")
         print(f"prompt written to: {summary['prompt']}")
@@ -806,6 +821,9 @@ def cmd_doctor(args, home: Path) -> int:
 def cmd_schedule(args, home: Path) -> int:
     cfg = load_config(home)
     if args.schedule_command == "install":
+        if args.mine:
+            cfg.setdefault("schedule", {})["mine"] = args.mine
+            save_config(home, cfg)
         result = schedule_install(home, cfg, dry_run=args.dry_run)
         if args.dry_run:
             print(f"scheduler: {result['kind']}")
@@ -817,8 +835,17 @@ def cmd_schedule(args, home: Path) -> int:
         print(f"scheduler: {result['kind']}")
         for path in result.get("files", {}):
             print(f"  {path}")
-        if result.get("enabled"):
-            print("mining:  enabled (weekly, Mon 09:00, jittered)")
+        if result.get("mine_removed"):
+            print("mining:  removed (cadence off)")
+        elif result.get("enabled"):
+            cadence = result.get("mine_cadence", "weekly")
+            detail = {
+                "weekly": "Mon 09:00, jittered",
+                "daily": "every day 09:00, jittered",
+                "every-other-day": "every 48h",
+                "smart": "daily check; mines once enough new sessions accumulate",
+            }.get(cadence, cadence)
+            print(f"mining:  enabled ({cadence}: {detail})")
         if result.get("sync_enabled"):
             print("sync:    enabled (frequent; `poppy sync status` for details)")
         elif not (cfg.get("sync") or {}).get("enabled"):
@@ -829,7 +856,11 @@ def cmd_schedule(args, home: Path) -> int:
         if args.json:
             print(json.dumps(status, indent=2))
             return 0
-        print(f"mining:  {'installed' if status.get('installed') else 'not installed'} ({status.get('kind')}): {status.get('detail')}")
+        cadence = status.get("mine_cadence", "weekly")
+        print(
+            f"mining:  {'installed' if status.get('installed') else 'not installed'} "
+            f"({status.get('kind')}, {cadence}): {status.get('detail')}"
+        )
         sync = status.get("sync") or {}
         print(f"sync:    {'installed' if sync.get('installed') else 'not installed'}: {sync.get('detail')}")
         return 0

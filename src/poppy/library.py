@@ -91,7 +91,7 @@ class Entry:
             "uses": int(record.get("uses", 0)),
             "archived": self.archived,
             "path": str(self.path),
-            "body": self.body,
+            "body": delivery_body(self.body),
         }
 
 
@@ -252,17 +252,26 @@ def _fact_path(home: Path, kind: str, scope: str, entry_id: str) -> Path:
 
 
 def fact_body(candidate: dict) -> str:
+    """The agent-facing text of a fact: one self-contained paragraph.
+
+    Evidence quotes stay on the source candidate (linked by ``source_candidate``)
+    and in the review UI — repeating them here only wastes the context of every
+    agent that fetches the entry.
+    """
     parts = [str(candidate.get("summary", "")).strip()]
     trigger = str(candidate.get("trigger", "")).strip()
     if trigger:
         parts.append(f"Applies when: {trigger}")
-    evidence = candidate.get("evidence") or []
-    if evidence:
-        lines = ["## Evidence"]
-        for item in evidence:
-            lines.append(f"- {item.get('source')}:{item.get('session')} — “{item.get('quote')}”")
-        parts.append("\n".join(lines))
     return "\n\n".join(part for part in parts if part)
+
+
+def delivery_body(body: str) -> str:
+    """Entry text without an embedded evidence section (entries written before
+    evidence moved out of the body keep their files; delivery stays lean)."""
+    marker = "\n## Evidence"
+    if marker in body:
+        return body.split(marker, 1)[0].rstrip()
+    return body
 
 
 def archive_entry(home: Path, entry: Entry) -> Entry:

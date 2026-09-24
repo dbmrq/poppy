@@ -15,14 +15,30 @@ queue as mined candidates — nothing becomes active until the user accepts it.
 
 ## What qualifies
 
-- **memory** — a durable fact or preference (user, machine, project, or task).
+The bar is the miner's bar: **could a capable agent work this out in a few
+minutes on its own?** If yes, it is not worth keeping. It must have cost real
+work in this session — a failed attempt, a correction, an environment quirk, a
+non-obvious flag, a dead end before it clicked.
+
+- **memory** — a durable fact or preference (user, machine, project, or task)
+  that is not derivable from the code, the docs, or common knowledge.
 - **rule** — a negative constraint that prevented or would prevent a real
   mistake ("Never …", "Always avoid …").
-- **skill** — a reusable procedure that saves real time next time.
+- **skill** — a reusable procedure that took real effort to work out and saves
+  that effort next time.
 
 Not: secrets or credentials, one-off task details, anything a capable agent
-already knows, or anything already in `poppy library list` /
-`poppy candidates list`.
+already knows (repo conventions, documented library behavior, standard tool
+usage), work that succeeded on the first try, or anything already in
+`poppy library list` / `poppy candidates list`.
+
+## Propose proactively
+
+When a session just produced something that passes the bar — even if the user
+did not ask you to remember it — say so in one line and queue it. Then tell the
+user it is waiting in the review queue and offer to open the Poppy UI
+(`poppy ui`); nothing becomes active until they accept it there. Do not queue
+weak candidates to be helpful: every one costs review time.
 
 ## How
 

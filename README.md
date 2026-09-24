@@ -107,7 +107,8 @@ Set `publish.target` (and `publish.subdir`) to make `--to` optional. Poppy re-va
 poppy init              create ~/.poppy (config, sources, library, builtins)
 poppy sources list|test|add
 poppy sessions list|search|read     transcript toolbox
-poppy mine [--since 14d] [--dry-run] mine recent sessions for candidates
+poppy mine [--since 14d] [--dry-run] [--if-due]
+                        mine recent sessions (--if-due skips when few are new)
 poppy ui [--host H] [--token T]
                         review queue + library (localhost by default)
 poppy accept <id>       skill: run writer agent; memory/rule: accept into library
@@ -121,7 +122,8 @@ poppy context show|export|wire|unwire|status|verify
 poppy library list|show|verify|pin|unpin|archive|restore|adopt
 poppy decay             archive stale entries (undo from the review queue)
 poppy doctor [--agent]  verify the installation
-poppy schedule install|status|uninstall
+poppy schedule install [--mine daily|every-other-day|weekly|smart|off]
+poppy schedule status|uninstall
 poppy sync init|run|status           private-repo sync across machines
 poppy publish <skill> [--to DIR] [--subdir S] [--commit] [--push] [--force]
                         copy a reviewed skill into a public skills repo

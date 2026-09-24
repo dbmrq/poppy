@@ -28,6 +28,11 @@ DEFAULT_CONFIG = {
         # the installing shell's PATH plus common user bin directories, so
         # scheduled runs resolve the same tools the installer verified.
         "path": "",
+        # How often the miner runs: daily | every-other-day | weekly | smart | off.
+        # `smart` checks daily but only mines once smart_min_sessions new sessions
+        # have accumulated since the last run.
+        "mine": "weekly",
+        "smart_min_sessions": 5,
     },
     "sync": {
         "enabled": False,

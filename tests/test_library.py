@@ -46,7 +46,10 @@ class TestLibrary(unittest.TestCase):
         listed = library.list_entries(self.home)
         self.assertEqual([e.id for e in listed], [entry.id])
         self.assertEqual(listed[0].title, "Prefers minimal dependencies")
-        self.assertIn("Evidence", listed[0].body)
+        # the body is the agent-facing text; quotes stay on the source candidate
+        self.assertIn("few or no dependencies", listed[0].body)
+        self.assertNotIn("Evidence", listed[0].body)
+        self.assertNotIn("## Evidence", listed[0].to_dict()["body"])
 
         library.set_pinned(listed[0], True)
         self.assertTrue(library.find_entry(self.home, entry.id).pinned)
@@ -62,6 +65,11 @@ class TestLibrary(unittest.TestCase):
 
         library.restore_entry(self.home, archived[0])
         self.assertEqual(len(library.list_entries(self.home)), 1)
+
+    def test_delivery_body_strips_legacy_evidence_sections(self):
+        legacy = "A fact that matters.\n\n## Evidence\n- source:session — “quote”"
+        self.assertEqual(library.delivery_body(legacy), "A fact that matters.")
+        self.assertEqual(library.delivery_body("Nothing to strip."), "Nothing to strip.")
 
     def test_scope_matching(self):
         user_entry = self.make(title="User fact")

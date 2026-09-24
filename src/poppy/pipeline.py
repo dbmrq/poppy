@@ -27,9 +27,11 @@ from .util import (
     acquire_lock,
     atomic_write_text,
     ensure_home_layout,
+    iso_to_epoch,
     load_json,
     now_iso,
     release_lock,
+    save_json,
     tail,
 )
 
@@ -90,18 +92,97 @@ def _evidence_block(candidate: dict) -> str:
     return "\n\n".join(chunks) if chunks else "(none)"
 
 
+def mine_state_path(home: Path) -> Path:
+    return library.state_dir(home) / "mine.json"
+
+
+def mine_state(home: Path) -> dict:
+    data = load_json(mine_state_path(home), {})
+    return data if isinstance(data, dict) else {}
+
+
+def save_mine_state(home: Path, **fields) -> dict:
+    state = mine_state(home)
+    state.update(fields)
+    save_json(mine_state_path(home), state)
+    return state
+
+
+def _last_mine_epoch(state: dict) -> float | None:
+    for key in ("finished_at", "started_at"):
+        epoch = iso_to_epoch(str(state.get(key) or ""))
+        if epoch:
+            return epoch
+    return None
+
+
+def mine_due(home: Path, cfg: dict) -> tuple[bool, int, str]:
+    """Smart scheduling: is there enough new material since the last run?"""
+    state = mine_state(home)
+    threshold = int((cfg.get("schedule") or {}).get("smart_min_sessions") or 5)
+    last = _last_mine_epoch(state)
+    if last is None:
+        return True, 0, "no previous mining run"
+    sources = load_sources(home)
+    if not sources:
+        return False, 0, "no sources configured"
+    limit = cfg.get("max_sessions_per_run")
+    sessions = collect_sessions(sources, since=max(0.0, time.time() - last), limit=int(limit) if limit else None)
+    count = len(sessions)
+    if threshold <= 0 or count >= threshold:
+        return True, count, f"{count} new session(s) since the last run"
+    return False, count, f"{count} new session(s) since the last run (fewer than {threshold})"
+
+
 def mine(
     home: Path,
     since_seconds: float | None = None,
     dry_run: bool = False,
     quiet: bool = False,
     config: dict | None = None,
+    if_due: bool = False,
 ) -> dict:
-    """Run one mining pass. Only one may run at a time (UI, CLI, or timer)."""
+    """Run one mining pass. Only one may run at a time (UI, CLI, or timer).
+
+    ``if_due`` makes the run conditional (smart scheduling): it checks how many
+    sessions accumulated since the last run and skips quietly when there are
+    fewer than ``schedule.smart_min_sessions``. Progress and outcome are
+    recorded in ``state/mine.json`` for the UI and later due-checks.
+    """
     ensure_home_layout(home)
     lock = acquire_lock(home, "mine")
     try:
-        return _mine(home, since_seconds=since_seconds, dry_run=dry_run, quiet=quiet, config=config)
+        cfg = config or load_config(home)
+        if if_due:
+            due, count, detail = mine_due(home, cfg)
+            if not due:
+                if not dry_run:
+                    save_mine_state(
+                        home, running=False, skipped=True, finished_at=now_iso(), sessions=count, detail=detail
+                    )
+                return {"due": False, "skipped": True, "sessions": count, "detail": detail}
+        if not dry_run:
+            save_mine_state(home, running=True, skipped=False, started_at=now_iso(), error=None)
+        try:
+            summary = _mine(home, since_seconds=since_seconds, dry_run=dry_run, quiet=quiet, config=cfg)
+        except Exception as exc:
+            if not dry_run:
+                save_mine_state(home, running=False, finished_at=now_iso(), error=str(exc))
+            raise
+        if not dry_run:
+            agent_exit = summary.get("agent_exit")
+            save_mine_state(
+                home,
+                running=False,
+                finished_at=now_iso(),
+                sessions=int(summary.get("sessions", 0)),
+                accepted=len(summary.get("accepted") or []),
+                invalid=len(summary.get("invalid") or []),
+                decay=int(summary.get("decay", 0)),
+                agent_exit=agent_exit,
+                error=(f"miner agent exited {agent_exit} — see the run log" if agent_exit not in (0, None) else None),
+            )
+        return summary
     finally:
         release_lock(lock)
 

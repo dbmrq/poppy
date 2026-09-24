@@ -153,12 +153,24 @@ poppy sync init --remote <private-repo-url>
 
 ## 7. Schedule
 
-Ask the user before installing a weekly job. Then:
+Ask the user how often the miner should run, and offer the options:
+
+- **daily** — a run every day;
+- **every other day**;
+- **weekly** — the default when they have no preference;
+- **smart** — check daily but only mine once enough new sessions have accumulated
+  (configurable with `schedule.smart_min_sessions`, default 5). Good for people
+  who do not code every day: no wasted runs, nothing missed for long;
+- **off** — no scheduled mining (they can still run `poppy mine` by hand).
+
+Then:
 
 ```bash
-poppy schedule install    # systemd user timer (Linux), launchd (macOS), or prints cron lines
+poppy schedule install --mine <daily|every-other-day|weekly|smart|off>
 poppy schedule status
 ```
+
+The choice is saved in config, so re-running `poppy schedule install` keeps it.
 
 When sync is enabled, this also installs a frequent sync timer. After installing, run `poppy doctor --agent` once more: the schedule check verifies the agent commands resolve under the timer's PATH, which is smaller than your shell's. Do **not** wait for the timers to fire; prove the pipeline with a manual run instead.
 

@@ -6,7 +6,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from poppy import schedule  # noqa: E402
+from poppy import pipeline, schedule, util  # noqa: E402
 from poppy.config import load_config  # noqa: E402
 from poppy.util import ensure_home_layout  # noqa: E402
 
@@ -73,6 +73,118 @@ class TestTimerPath(unittest.TestCase):
             self.assertTrue(stored)
             self.assertIn("/usr/bin", stored)
             self.assertIn(f"Environment=PATH={stored}", text)
+
+
+class TestMineCadence(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / "poppy-home"
+        ensure_home_layout(self.home)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_cadences_shape_the_timer_units(self):
+        cases = {
+            "weekly": ("OnCalendar=Mon 09:00", "mine --quiet", False),
+            "daily": ("OnCalendar=*-*-* 09:00", "mine --quiet", False),
+            "every-other-day": ("OnUnitActiveSec=48h", "mine --quiet", False),
+            "smart": ("OnCalendar=*-*-* 09:00", "mine --quiet --if-due", False),
+        }
+        for cadence, (timing, command, _) in cases.items():
+            with self.subTest(cadence=cadence):
+                root = Path(self.tmp.name) / cadence
+                service = root / "poppy-mine.service"
+                timer = root / "poppy-mine.timer"
+                cfg = load_config(self.home)
+                with mock.patch("poppy.schedule.platform_kind", return_value="systemd"), mock.patch(
+                    "poppy.schedule.systemd_paths", return_value=(service, timer)
+                ), mock.patch("poppy.schedule._systemctl"):
+                    result = schedule.install(self.home, cfg, include_sync=False, cadence=cadence)
+                self.assertEqual(result["mine_cadence"], cadence)
+                self.assertIn(timing, timer.read_text(encoding="utf-8"))
+                self.assertIn(command, service.read_text(encoding="utf-8"))
+                self.assertEqual(load_config(self.home)["schedule"]["mine"], cadence)
+
+    def test_off_removes_the_mining_job_and_returns(self):
+        service = Path(self.tmp.name) / "poppy-mine.service"
+        timer = Path(self.tmp.name) / "poppy-mine.timer"
+        service.write_text("stale", encoding="utf-8")
+        timer.write_text("stale", encoding="utf-8")
+        cfg = load_config(self.home)
+        with mock.patch("poppy.schedule.platform_kind", return_value="systemd"), mock.patch(
+            "poppy.schedule.systemd_paths", return_value=(service, timer)
+        ), mock.patch("poppy.schedule._systemctl"):
+            result = schedule.install(self.home, cfg, include_sync=False, cadence="off")
+        self.assertFalse(result["enabled"])
+        self.assertTrue(result["mine_removed"])
+        self.assertFalse(service.exists())
+        self.assertFalse(timer.exists())
+        self.assertEqual(load_config(self.home)["schedule"]["mine"], "off")
+
+    def test_cron_line_follows_the_cadence(self):
+        cfg = {"schedule": {"mine": "smart", "path": "/usr/bin"}, "sync": {}}
+        line = schedule.cron_line(self.home, cfg)
+        self.assertIn("0 9 * * *", line)
+        self.assertIn("mine --quiet --if-due", line)
+        line = schedule.cron_line(self.home, {"schedule": {"path": "/usr/bin"}})
+        self.assertIn("0 9 * * 1", line)
+
+    def test_launchd_daily_has_no_weekday(self):
+        plist = schedule._plist(
+            "com.poppy.mine",
+            ["/usr/local/bin/poppy", "mine", "--quiet"],
+            self.home,
+            self.home / "logs" / "scheduled.log",
+            schedule.MINE_CALENDAR.format(weekday=""),
+            "/usr/bin",
+        )
+        self.assertNotIn("Weekday", plist)
+        self.assertIn("<key>Hour</key><integer>9</integer>", plist)
+
+
+class TestMineDue(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / "poppy-home"
+        ensure_home_layout(self.home)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_due_without_a_previous_run(self):
+        due, _count, detail = pipeline.mine_due(self.home, {"schedule": {"smart_min_sessions": 5}})
+        self.assertTrue(due)
+        self.assertIn("no previous", detail)
+
+    def test_not_due_when_nothing_accumulated(self):
+        pipeline.save_mine_state(self.home, running=False, finished_at=util.now_iso())
+        with mock.patch("poppy.pipeline.load_sources", return_value=[{"name": "fake", "type": "files"}]), mock.patch(
+            "poppy.pipeline.collect_sessions", return_value=[1, 2]
+        ):
+            due, count, detail = pipeline.mine_due(self.home, {"schedule": {"smart_min_sessions": 5}})
+        self.assertFalse(due)
+        self.assertEqual(count, 2)
+        self.assertIn("fewer than 5", detail)
+
+    def test_due_once_enough_accumulated(self):
+        pipeline.save_mine_state(self.home, running=False, finished_at=util.now_iso())
+        with mock.patch("poppy.pipeline.load_sources", return_value=[{"name": "fake", "type": "files"}]), mock.patch(
+            "poppy.pipeline.collect_sessions", return_value=list(range(6))
+        ):
+            due, count, detail = pipeline.mine_due(self.home, {"schedule": {"smart_min_sessions": 5}})
+        self.assertTrue(due)
+        self.assertEqual(count, 6)
+        self.assertNotIn("fewer than", detail)
+
+    def test_mine_skips_quietly_when_not_due(self):
+        pipeline.save_mine_state(self.home, running=False, finished_at=util.now_iso())
+        summary = pipeline.mine(self.home, if_due=True, config={"schedule": {"smart_min_sessions": 5}})
+        self.assertTrue(summary["skipped"])
+        self.assertFalse(summary["due"])
+        state = pipeline.mine_state(self.home)
+        self.assertFalse(state["running"])
+        self.assertTrue(state["skipped"])
 
 
 if __name__ == "__main__":

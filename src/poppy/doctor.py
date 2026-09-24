@@ -130,9 +130,11 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
             checks.append(Check(f"agent.{role}.test", "ok" if ok else "fail", detail))
 
     status = schedule_status(home, cfg)
-    checks.append(
-        Check("schedule", "ok" if status.get("installed") else "warn", status.get("detail", ""))
-    )
+    cadence = status.get("mine_cadence")
+    detail = status.get("detail", "")
+    if cadence and status.get("installed"):
+        detail = f"{detail} · miner: {cadence}"
+    checks.append(Check("schedule", "ok" if status.get("installed") else "warn", detail))
     if status.get("installed") and status.get("kind") in ("launchd", "systemd"):
         stored = scheduled_path(cfg)
         if not stored:

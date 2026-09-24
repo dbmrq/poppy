@@ -22,28 +22,37 @@ from .util import (
 MINE_LABEL = "poppy-mine"
 SYNC_LABEL = "poppy-sync"
 
+MINE_CADENCES = ("daily", "every-other-day", "weekly", "smart", "off")
+DEFAULT_MINE_CADENCE = "weekly"
+
 MINE_SERVICE = """[Unit]
 Description=Poppy: mine recent agent sessions for reusable skills
 
 [Service]
 Type=oneshot
-ExecStart={cmd} mine --quiet
+ExecStart={cmd} mine --quiet{mine_flags}
 Environment=POPPY_HOME={home}
 Environment=PATH={path}
 Nice=10
 """
 
 MINE_TIMER = """[Unit]
-Description=Weekly Poppy mining run
+Description=Poppy mining run ({cadence})
 
 [Timer]
-OnCalendar=Mon 09:00
-RandomizedDelaySec=1800
+{timing}RandomizedDelaySec=1800
 Persistent=true
 
 [Install]
 WantedBy=timers.target
 """
+
+MINE_TIMING = {
+    "daily": "OnCalendar=*-*-* 09:00\n",
+    "weekly": "OnCalendar=Mon 09:00\n",
+    "every-other-day": "OnBootSec=15min\nOnUnitActiveSec=48h\n",
+    "smart": "OnCalendar=*-*-* 09:00\n",
+}
 
 SYNC_SERVICE = """[Unit]
 Description=Poppy: sync the library with its private git remote
@@ -87,10 +96,15 @@ PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 
 MINE_CALENDAR = """  <key>StartCalendarInterval</key>
   <dict>
-    <key>Weekday</key><integer>1</integer>
-    <key>Hour</key><integer>9</integer>
+{weekday}    <key>Hour</key><integer>9</integer>
     <key>Minute</key><integer>0</integer>
   </dict>
+"""
+
+MINE_WEEKDAY = "    <key>Weekday</key><integer>1</integer>\n"
+
+MINE_INTERVAL = """  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>{interval_sec}</integer>
 """
 
 SYNC_INTERVAL = """  <key>RunAtLoad</key><true/>
@@ -182,10 +196,23 @@ def _cron_command(path: str, command: str) -> str:
     return f"/usr/bin/env PATH={shlex.quote(path)} {command}"
 
 
-def cron_line(home: Path, cfg: dict) -> str:
+def mine_cadence(cfg: dict) -> str:
+    """The configured mining cadence (one of MINE_CADENCES)."""
+    raw = str((cfg.get("schedule") or {}).get("mine") or DEFAULT_MINE_CADENCE).strip().lower()
+    return raw if raw in MINE_CADENCES else DEFAULT_MINE_CADENCE
+
+
+def cron_line(home: Path, cfg: dict, cadence: str | None = None) -> str:
+    cadence = cadence or mine_cadence(cfg)
+    spec = {
+        "daily": "0 9 * * *",
+        "weekly": "0 9 * * 1",
+        "every-other-day": "0 9 */2 * *",
+    }.get(cadence, "0 9 * * *")
+    flags = " --if-due" if cadence == "smart" else ""
     return (
-        f"0 9 * * 1 {_cron_command(resolve_schedule_path(cfg), launch_command_str())} "
-        "mine --quiet  # poppy: weekly skills mining"
+        f"{spec} {_cron_command(resolve_schedule_path(cfg), launch_command_str())} "
+        f"mine --quiet{flags}  # poppy: mining ({cadence})"
     )
 
 
@@ -203,40 +230,67 @@ def install(
     dry_run: bool = False,
     include_mine: bool = True,
     include_sync: bool | None = None,
+    cadence: str | None = None,
 ) -> dict:
-    """Install/refresh the timers. ``include_sync`` defaults to sync.enabled + sync.schedule."""
+    """Install/refresh the timers.
+
+    ``include_sync`` defaults to sync.enabled + sync.schedule. ``cadence``
+    defaults to ``schedule.mine`` in config (daily | every-other-day | weekly |
+    smart | off); ``off`` removes an installed mining job and leaves sync alone.
+    """
     kind = platform_kind()
     if include_sync is None:
         sync_cfg = cfg.get("sync") or {}
         include_sync = bool(sync_cfg.get("enabled")) and bool(sync_cfg.get("schedule", True))
     include_sync = bool(include_sync)
+    cadence = str(cadence or mine_cadence(cfg)).strip().lower()
+    if cadence not in MINE_CADENCES:
+        raise PoppyError(f"unknown cadence {cadence!r} (expected one of {', '.join(MINE_CADENCES)})")
+    include_mine = bool(include_mine) and cadence != "off"
+    mine_flags = " --if-due" if cadence == "smart" else ""
     interval = sync_interval_minutes(cfg)
     path = resolve_schedule_path(cfg)
     stored_path = scheduled_path(cfg)
+    stored_cadence = mine_cadence(cfg)
+
     if kind == "systemd":
         files: dict[str, str] = {}
         if include_mine:
             service_path, timer_path = systemd_paths(MINE_LABEL)
             files[str(service_path)] = MINE_SERVICE.format(
-                cmd=launch_command_str(), home=home, path=_systemd_path_value(path)
+                cmd=launch_command_str(),
+                home=home,
+                path=_systemd_path_value(path),
+                mine_flags=mine_flags,
             )
-            files[str(timer_path)] = MINE_TIMER
+            files[str(timer_path)] = MINE_TIMER.format(cadence=cadence, timing=MINE_TIMING[cadence])
         if include_sync:
             sync_service_path, sync_timer_path = systemd_paths(SYNC_LABEL)
             files[str(sync_service_path)] = SYNC_SERVICE.format(
                 cmd=launch_command_str(), home=home, path=_systemd_path_value(path)
             )
             files[str(sync_timer_path)] = SYNC_TIMER.format(interval=interval)
-        if not files:
+        if not files and cadence != "off":
             raise PoppyError("nothing to install: mining and sync schedules are both disabled")
         if dry_run:
-            return {"kind": kind, "enabled": False, "sync_enabled": include_sync, "files": files}
-        if path != stored_path:
-            cfg.setdefault("schedule", {})["path"] = path
+            return {"kind": kind, "enabled": include_mine, "mine_cadence": cadence, "sync_enabled": include_sync, "files": files}
+        if path != stored_path or cadence != stored_cadence:
+            schedule_cfg = cfg.setdefault("schedule", {})
+            schedule_cfg["path"] = path
+            schedule_cfg["mine"] = cadence
             save_config(home, cfg)
+        removed = False
+        if cadence == "off":
+            _systemctl(["disable", "--now", f"{MINE_LABEL}.timer"], check=False)
+            for unit_path in systemd_paths(MINE_LABEL):
+                if unit_path.exists():
+                    unit_path.unlink()
+                    removed = True
+            _systemctl(["daemon-reload"], check=False)
         for path_text, content in files.items():
             atomic_write_text(Path(path_text), content)
-        _systemctl(["daemon-reload"])
+        if files:
+            _systemctl(["daemon-reload"])
         if include_mine:
             _systemctl(["enable", "--now", f"{MINE_LABEL}.timer"])
         if include_sync:
@@ -244,18 +298,27 @@ def install(
         return {
             "kind": kind,
             "enabled": include_mine,
+            "mine_cadence": cadence,
+            "mine_removed": removed,
             "sync_enabled": include_sync,
             "files": {path: "written" for path in files},
         }
+
     if kind == "launchd":
         files = {}
         if include_mine:
+            weekday = MINE_WEEKDAY if cadence == "weekly" else ""
+            schedule_xml = (
+                MINE_INTERVAL.format(interval_sec=48 * 3600)
+                if cadence == "every-other-day"
+                else MINE_CALENDAR.format(weekday=weekday)
+            )
             files[str(launchd_path("mine"))] = _plist(
                 "com.poppy.mine",
-                [*launch_command(), "mine", "--quiet"],
+                [*launch_command(), "mine", "--quiet", *(["--if-due"] if cadence == "smart" else [])],
                 home,
                 home / "logs" / "scheduled.log",
-                MINE_CALENDAR,
+                schedule_xml,
                 path,
             )
         if include_sync:
@@ -267,13 +330,22 @@ def install(
                 SYNC_INTERVAL.format(interval_sec=interval * 60),
                 path,
             )
-        if not files:
+        if not files and cadence != "off":
             raise PoppyError("nothing to install: mining and sync schedules are both disabled")
         if dry_run:
-            return {"kind": kind, "enabled": False, "sync_enabled": include_sync, "files": files}
-        if path != stored_path:
-            cfg.setdefault("schedule", {})["path"] = path
+            return {"kind": kind, "enabled": include_mine, "mine_cadence": cadence, "sync_enabled": include_sync, "files": files}
+        if path != stored_path or cadence != stored_cadence:
+            schedule_cfg = cfg.setdefault("schedule", {})
+            schedule_cfg["path"] = path
+            schedule_cfg["mine"] = cadence
             save_config(home, cfg)
+        removed = False
+        if cadence == "off":
+            stale = launchd_path("mine")
+            if stale.exists():
+                subprocess.run(["launchctl", "unload", "-w", str(stale)], check=False, capture_output=True)
+                stale.unlink()
+                removed = True
         for path_text, plist in files.items():
             target = Path(path_text)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -284,18 +356,35 @@ def install(
         return {
             "kind": kind,
             "enabled": include_mine,
+            "mine_cadence": cadence,
+            "mine_removed": removed,
             "sync_enabled": include_sync,
             "files": {path: "written" for path in files},
         }
+
     lines = []
     if include_mine:
-        lines.append(cron_line(home))
+        lines.append(cron_line(home, cfg, cadence))
     if include_sync:
         lines.append(sync_cron_line(home, cfg))
-    if not lines:
+    if not lines and cadence != "off":
         raise PoppyError("nothing to install: mining and sync schedules are both disabled")
     if dry_run:
-        return {"kind": "cron", "enabled": False, "sync_enabled": include_sync, "files": {}, "cron_lines": lines}
+        return {
+            "kind": "cron",
+            "enabled": include_mine,
+            "mine_cadence": cadence,
+            "sync_enabled": include_sync,
+            "files": {},
+            "cron_lines": lines,
+        }
+    if path != stored_path or cadence != stored_cadence:
+        schedule_cfg = cfg.setdefault("schedule", {})
+        schedule_cfg["path"] = path
+        schedule_cfg["mine"] = cadence
+        save_config(home, cfg)
+    if not lines:
+        return {"kind": "cron", "enabled": False, "mine_cadence": cadence, "sync_enabled": include_sync, "files": {}}
     raise PoppyError(
         "no supported scheduler found; add these lines with `crontab -e`:\n  " + "\n  ".join(lines)
     )
@@ -320,10 +409,11 @@ def _systemd_state(label: str) -> dict:
 
 def status(home: Path, cfg: dict) -> dict:
     kind = platform_kind()
+    cadence = mine_cadence(cfg)
     sync_cfg = cfg.get("sync") or {}
     sync_on = bool(sync_cfg.get("enabled")) and bool(sync_cfg.get("schedule", True))
     if kind == "systemd":
-        out = {"kind": kind, **_systemd_state(MINE_LABEL)}
+        out = {"kind": kind, "mine_cadence": cadence, **_systemd_state(MINE_LABEL)}
         if sync_on:
             out["sync"] = _systemd_state(SYNC_LABEL)
         else:
@@ -333,6 +423,7 @@ def status(home: Path, cfg: dict) -> dict:
         path = launchd_path("mine")
         out = {
             "kind": kind,
+            "mine_cadence": cadence,
             "installed": path.exists(),
             "detail": str(path) if path.exists() else f"no plist at {path}",
         }
@@ -345,7 +436,12 @@ def status(home: Path, cfg: dict) -> dict:
         else:
             out["sync"] = {"installed": False, "detail": "sync scheduling not enabled"}
         return out
-    out = {"kind": "cron", "installed": False, "detail": f"add manually: {cron_line(home, cfg)}"}
+    out = {
+        "kind": "cron",
+        "mine_cadence": cadence,
+        "installed": False,
+        "detail": f"add manually: {cron_line(home, cfg, cadence)}",
+    }
     out["sync"] = (
         {"installed": False, "detail": f"add manually: {sync_cron_line(home, cfg)}"}
         if sync_on
@@ -378,5 +474,5 @@ def uninstall(home: Path, cfg: dict | None = None) -> dict:
     return {
         "kind": "cron",
         "removed": [],
-        "detail": f"remove manually: {cron_line(home, cfg or {})}",
+        "detail": f"remove manually: {cron_line(home, cfg or {}, mine_cadence(cfg or {}))}",
     }
