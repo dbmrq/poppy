@@ -97,13 +97,19 @@
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
     padding: 14px 17px; margin: 16px 0 4px;
   }
-  .legend h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
-  .legend dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; font-size: 13.5px; }
+  .legend h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .legend h3:not(:first-child) { margin-top: 16px; }
+  .legend dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 13.5px; }
   .legend dt { font-weight: 600; white-space: nowrap; }
   .legend dd { margin: 0; color: var(--muted); }
-  .legend .paths { margin: 12px 0 0; color: var(--muted); font-size: 12.5px; }
+  .legend ul { margin: 0; padding-left: 18px; }
+  .legend li { color: var(--muted); font-size: 13.5px; margin: 3px 0; }
+  .legend code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; background: var(--code-bg); padding: 1px 5px; border-radius: 4px;
+  }
   @media (max-width: 560px) {
-    .legend dl { grid-template-columns: 1fr; }
+    .legend dl { grid-template-columns: 1fr; gap: 2px; }
     .legend dd { margin-bottom: 6px; }
   }
   .demo {
@@ -133,19 +139,27 @@
 </header>
 <main>
   <section class="legend" id="legend" hidden>
-    <h3>What the options do</h3>
+    <h3>Buttons</h3>
     <dl>
-      <dt>Write skill</dt><dd>The candidate is a good idea — have the writer agent draft the skill. You review the draft next.</dd>
-      <dt>Accept</dt><dd>Put it to work: a skill is installed into your agents' skill directories and the library; a memory or rule becomes active in the library at the chosen scope.</dd>
-      <dt>Rewrite…</dt><dd>Ask the writer for a new draft, with an optional note to steer it (what was wrong, what to focus on). The note is kept for the next rewrite.</dd>
-      <dt>Reject</dt><dd>No — and don't propose it again. Your reason is remembered (and syncs between machines).</dd>
-      <dt>Verify</dt><dd>The entry is still true: resets the staleness clock without needing a use.</dd>
-      <dt>Pin / Unpin</dt><dd>Pinned entries are never archived by decay; unpin lets them age again.</dd>
-      <dt>Archive</dt><dd>Stop using an entry (soft delete): it leaves the digest and your agents, but stays restorable. Archiving a skill also removes it from your agents' skill directories.</dd>
-      <dt>Restore</dt><dd>Bring an archived entry back into use; this also refreshes its staleness clock.</dd>
-      <dt>Decay</dt><dd>Entries nobody used or verified for a while are archived automatically. Each one gets a card in the queue to restore or confirm.</dd>
+      <dt>Write skill</dt><dd>Draft the skill from this candidate.</dd>
+      <dt>Accept</dt><dd>Keep it: skills install into your agents; memories and rules become active.</dd>
+      <dt>Rewrite</dt><dd>Ask for another draft; add a note to steer it (the note is kept).</dd>
+      <dt>Reject</dt><dd>No, and don't propose it again.</dd>
+      <dt>Pin / Unpin</dt><dd>Protect an entry from decay / let it age again.</dd>
+      <dt>Archive</dt><dd>Stop using it (a skill is uninstalled too); restorable.</dd>
+      <dt>Restore</dt><dd>Bring it back; this refreshes its clock.</dd>
     </dl>
-    <p class="paths" id="paths"></p>
+    <h3>Behavior</h3>
+    <ul>
+      <li>Entries nobody uses are archived automatically (decay); each one gets a card here to restore or confirm.</li>
+      <li>Nothing is deleted — archived entries stay restorable.</li>
+      <li>Your rejection reasons and rewrite notes are remembered.</li>
+    </ul>
+    <h3>Paths</h3>
+    <dl>
+      <dt>Library</dt><dd><code id="path-home">…</code> — everything Poppy manages.</dd>
+      <dt>Skill dirs</dt><dd><code id="path-skills">…</code> — where your agents load skills from; accepted skills are mirrored here.</dd>
+    </dl>
   </section>
   <div class="demo" id="demo" hidden>Demo mode — mock data; actions do not touch your library.</div>
   <section>
@@ -342,7 +356,7 @@ function candidateCard(candidate) {
     );
   }
   actions.append(
-    el("button", { text: "Rewrite…", onclick: () => rewrite.classList.add("open") }),
+    el("button", { text: "Rewrite", onclick: () => rewrite.classList.add("open") }),
     el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
   );
   children.push(actions, rewrite, reject);
@@ -365,7 +379,6 @@ function entryRow(entry, archived = false) {
     );
   } else {
     ops.append(
-      el("button", { text: "Verify", onclick: () => act("entry_verify", { id: entry.id }) }),
       el("button", {
         text: entry.pinned ? "Unpin" : "Pin",
         onclick: () => act("entry_pin", { id: entry.id, pinned: !entry.pinned }),
@@ -424,7 +437,8 @@ function render(state) {
   $("#archived-count").textContent = archived.length ? `· ${archived.length}` : "";
 
   const dirs = (state.skills_dirs || []).map((d) => typeof d === "string" ? d : d.path).join(", ");
-  $("#paths").textContent = `${state.home} · skills: ${dirs || "none configured"}`;
+  $("#path-home").textContent = state.home;
+  $("#path-skills").textContent = dirs || "none configured";
 }
 
 async function refresh() {
