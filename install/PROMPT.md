@@ -2,7 +2,7 @@
 
 You are an AI coding agent. Install Poppy — a weekly skill-mining system — for yourself on this machine. Poppy is harness-agnostic: **you** are the harness-specific part. Work through the steps in order and verify each one before moving on. Ask the user only for things you cannot detect (schedule yes/no, lookback window). Keep messages short.
 
-If `~/.poppy` already exists, treat this as an update: read the existing config first and preserve the user's choices. If `poppy` is already on PATH, run `poppy update` and `poppy init` (step 1) instead of reinstalling.
+If `~/.poppy` already exists, treat this as an update: read the existing config first and preserve the user's choices. If `poppy` is already on PATH, run `poppy update` and `poppy init` (step 1) instead of reinstalling; if `poppy update` says a package manager owns the install, upgrade through that manager instead (for Homebrew: `brew upgrade poppy-ai`).
 
 ## 1. Install the tool
 
@@ -42,21 +42,11 @@ Poppy has no per-harness integrations — **you** are the harness-specific part.
 Work down this list for your harness, and for any other agent that has run on this machine:
 
 1. **Your own CLI first.** Look for session/export commands (`<agent> --help`; subcommands like `sessions`, `history`, `logs`, `export`, `resume --list`). If one lists sessions and prints one as text, configure `type: command` — that is the most stable option.
-2. **Your data directory.** Harnesses follow conventions: `~/.local/share/<name>/`, `~/.config/<name>/`, `~/.<name>/`, `~/Library/Application Support/<name>/` (macOS), VS Code-family extensions (`.../User/globalStorage/<publisher>.<extension>/`), or whatever your docs, `--help`, or environment (`$XDG_DATA_HOME`) mention.
+2. **Your data directory.** Session stores follow ordinary conventions: `~/.local/share/<name>/`, `~/.config/<name>/`, `~/.<name>/`, `~/Library/Application Support/<name>/` (macOS), editor or IDE plugin storage (a `globalStorage/<publisher>.<extension>/` directory), or whatever your docs, `--help`, or environment (`$XDG_DATA_HOME`) mention.
 3. **Prefer, in order:** per-session files (`*.jsonl`, `*.json`, `*.md` in a sessions directory) → a SQLite database (`*.db`, `*.sqlite`, `state.vscdb`) → a single history/log file for everything.
 4. **If you cannot find a store, ask the user where transcripts live.** Never invent a source, and never configure one whose read returns metadata instead of conversation text.
 
-Examples verified by other agents — treat them as *shapes*, not a support list, and do not stop at them:
-
-| Harness | Shape |
-| --- | --- |
-| OpenCode v2 | SQLite (`~/.local/share/opencode/opencode.db`; `session_v2`, `session_message`) |
-| OpenCode 1.x | same DB, older tables (`session`, `message`, `part`) |
-| Pi | JSONL per session (`~/.pi/agent/sessions/**/*.jsonl`) |
-| Claude Code | JSONL per project (`~/.claude/projects/**/*.jsonl`) |
-| Codex | JSONL rollouts (`~/.codex/sessions/**/rollout-*.jsonl`; older files may be `.zst`) |
-| Cursor | VS Code globalStorage SQLite (`state.vscdb`) |
-| Gemini CLI | JSONL chats (`~/.gemini/tmp/*/chats/*.jsonl`) |
+There is no list of known stores to consult: open the directories, list the tables, and look at real rows until you find conversation text. For a SQLite store, Poppy needs two queries — a `list_query` selecting one row per session (`id` plus any of `time*`, `title`/`name`, `cwd`/`directory`) and a `read_query` returning one row per message with a column named `text`, in time order. If messages are stored as JSON blobs, extract the text in SQL; if several parts make up one assistant turn, concatenate them.
 
 ### Configure it
 
@@ -71,33 +61,13 @@ Awkward shapes are still covered:
 - **One file for everything** (a chat history or log): point `files` at it (it becomes one long session — coarse but workable), or write a small read-only splitter and configure it as a `command` source.
 - **An exotic format:** the same escape hatch — a tiny read-only extractor in `~/.poppy/sources/` configured as a `command` source. Keep extractors read-only and inside `~/.poppy`.
 
-Verified SQLite example (OpenCode v2, tested 2026-09):
-
-```json
-{
-  "name": "opencode",
-  "type": "sqlite",
-  "description": "OpenCode v2 sessions",
-  "path": "~/.local/share/opencode/opencode.db",
-  "list_query": "SELECT id, title, directory AS cwd, time_updated FROM session_v2 ORDER BY time_updated DESC LIMIT :limit",
-  "read_query": "SELECT CASE WHEN type='user' THEN json_extract(data,'$.text') ELSE (SELECT group_concat(json_extract(value,'$.text'), char(10)) FROM json_each(session_message.data,'$.content') WHERE json_extract(value,'$.type') IN ('text','reasoning')) END AS text FROM session_message WHERE session_id = :id ORDER BY seq"
-}
-```
-
 ### Prove it
 
 Add each source (`poppy sources add --file <tmpfile>`) and run `poppy sources test <name>` until it passes. Then read a session end-to-end (`poppy sessions read <id> --source <name>`) and confirm it is real conversation text. **A source that does not pass is not configured.** Some harness commands only cover the current project; prefer a database/file source when you need all projects. `poppy doctor` must show every source healthy when you are done.
 
 ## 3. Configure the agent commands
 
-Poppy runs agents headlessly. Determine how to invoke **yourself** non-interactively, with permissions that do not need a human, and with the prompt as an argument. Use `{prompt}` as the placeholder. Examples (verify the flags with `--help`):
-
-- Claude Code: `["claude", "-p", "{prompt}"]`
-- OpenCode: `["opencode", "run", "--auto", "--format", "json", "{prompt}"]`
-- Codex: `["codex", "exec", "{prompt}"]` (check approval flags)
-- Pi: check its CLI for a print/non-interactive mode
-
-Set both roles:
+Poppy runs agents headlessly. Determine how to invoke **yourself** non-interactively, with permissions that do not need a human, and with the prompt as an argument. Inspect your own CLI (`--help`; look for a run/print/exec mode, approval flags, and an output format) — do not copy a command line from anywhere, including this document. Use `{prompt}` as the placeholder:
 
 ```bash
 poppy config set agent.miner.cmd '["<agent>", "...", "{prompt}"]'
@@ -105,6 +75,8 @@ poppy config set agent.writer.cmd '["<agent>", "...", "{prompt}"]'
 ```
 
 If the CLI reads stdin instead of taking a prompt argument, omit the placeholder. `{prompt_file}` substitutes a temp file path. Then run `poppy doctor --agent`; both agent tests must pass.
+
+Scheduled runs do not get your shell environment. Poppy embeds a PATH into installed timers and `poppy doctor` checks that your commands resolve under it, but anything else that depends on your interactive shell (aliases, exported variables, startup files) will be missing on a timer. Prefer an absolute program path, and pass any extra environment inside the command itself — for example a small wrapper script. You will re-verify once the schedule exists (step 7).
 
 ### Choose models for the miner and writer
 
@@ -123,7 +95,7 @@ Keeping your CLI's default model is also fine if the user prefers. Very cheap mo
 
 ## 4. Skills directories
 
-`poppy init` auto-detected the skill directories that already exist on this machine (e.g. `~/.agents/skills`, `~/.claude/skills`, `~/.config/opencode/skills`, `~/.pi/agent/skills`). Check that the list covers where you actually load skills from, and fix it if not:
+`poppy init` auto-detected the skill directories that already exist on this machine. Check that the list covers where you actually load skills from, and fix it if not:
 
 ```bash
 poppy config get skills_dirs
@@ -140,14 +112,14 @@ Poppy materializes a small always-on digest at `~/.poppy/context/poppy.md`: bind
 poppy context export
 ```
 
-- **Preferred:** point your harness's native include/instructions mechanism at that file (for example, OpenCode's `instructions` config entry, or an import of `~/.poppy/context/poppy.md` in Claude Code's `CLAUDE.md`). This keeps Poppy content in its own file.
-- **Otherwise:** insert a managed block into your global context file (`AGENTS.md`, `CLAUDE.md`, …):
+- **Preferred:** point whatever mechanism your harness *actually loads* for global instructions at that file — an include, an import, a native instructions path. Do not trust acceptance as evidence: find the place a fresh session really reads, and keep Poppy content in its own file when the mechanism allows it.
+- **Otherwise:** insert a managed block into your global context file:
 
 ```bash
 poppy context wire --file <path-to-global-context-file>
 ```
 
-Then prove it actually reaches sessions:
+A config entry that is accepted but never loaded is a common trap; if the digest does not arrive in a fresh session, the mechanism does not count. Then prove it actually reaches sessions:
 
 ```bash
 poppy context verify
@@ -172,6 +144,13 @@ poppy sync init --remote <private-repo-url>
 
 `~/.poppy` itself becomes the git repo: the library, candidate queue, and clean rejections are tracked; machine-local state (config, sources, mirrors, usage, logs, drafts) is ignored. The command commits, pushes, and materializes mirrors on this machine. It also installs the **automatic sync timer** (systemd/launchd; every `sync.interval_min`, default 30 minutes) so machines stay in sync without being prompted — pass `--no-schedule` if the user does not want background jobs. Conflicts are never auto-merged: `poppy sync status` explains what to resolve. Skip this step entirely if the user has one machine.
 
+The timer runs in the scheduler's environment, not your shell. If git credentials come from shell startup files, exported variables, or a vault, the timer will not see them and every scheduled sync will stay offline while local commits pile up. `poppy sync init` probes this and reports whether the timer can reach the remote. When it cannot, point `sync.env_file` at a readable `KEY=value` file that holds the credentials (machine-local — it is never synced), then re-run `poppy sync init`:
+
+```bash
+poppy config set sync.env_file '~/.cache/<your-vault>/env'
+poppy sync init --remote <private-repo-url>
+```
+
 ## 7. Schedule
 
 Ask the user before installing a weekly job. Then:
@@ -181,7 +160,7 @@ poppy schedule install    # systemd user timer (Linux), launchd (macOS), or prin
 poppy schedule status
 ```
 
-When sync is enabled, this also installs a frequent sync timer. Do **not** wait for the timers to fire; prove the pipeline with a manual run instead.
+When sync is enabled, this also installs a frequent sync timer. After installing, run `poppy doctor --agent` once more: the schedule check verifies the agent commands resolve under the timer's PATH, which is smaller than your shell's. Do **not** wait for the timers to fire; prove the pipeline with a manual run instead.
 
 ## 8. First mining run
 
