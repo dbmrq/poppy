@@ -748,6 +748,8 @@ def _print_sync_run(result: dict) -> None:
 def _print_sync_status(status: dict) -> None:
     if not status["initialized"]:
         print(f"repo:    not initialized ({status['repo']}) — run `poppy sync init`")
+        print("         if another machine already syncs this library, point this one at the same repo:")
+        print("         poppy sync init --remote <url>")
         return
     print(f"repo:    {status['repo']} (branch {status['branch']})")
     print(f"remote:  {status['remote'] or '(none — local only)'}")

@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V3** (skills, memories, rules, decay, materialized memory index, multi-machine sync). This document is the persistent design and is updated as phases land.
+Status: **V3.5** (skills, memories, rules, decay, memory index, multi-machine sync, installer polish). This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -231,6 +231,11 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 The digest is regenerated deterministically after every approval, archive, pin, install, and sync; it has hard budgets (20 binding rules, 40 headlines, 8 KB) and drops the least-used entries with a note. The installer wires it into the harness's native include mechanism where one exists, or inserts a delimited managed block (`poppy context wire --file …`), and must prove visibility with `poppy context verify` (a canary headless run). Nothing executes at session time, and there is no per-harness code: delivery is files, placement is installer configuration, and the proof is a passing test. `pin` remains only a decay exemption — "must always apply" is what rules are for.
 
 **V3 — sync + scopes (done).** One private git repo per user, rooted at `~/.poppy`; `poppy sync init --remote <url>` sets it up, `poppy sync run` commits, fetches, rebases, pushes, then materializes locally (skill mirrors reconciled against the library, digest regenerated). Exit codes: 0 = nothing to do, 1 = synced/materialized or a soft remote error to retry, 2 = conflict or hard error. Offline runs soft-fail and push on the next run; conflicts abort the rebase and are surfaced (`poppy sync status`), never auto-merged. `poppy schedule install` also installs a frequent sync timer (default every 30 minutes, `sync.interval_min`) when sync is enabled. Uninstall/archive propagates: the library deletion syncs and other machines remove their mirrors on the next run. The inbox stays local (validated candidates are the shared artifact); usage, mirrors, logs, and indexes are per-machine and rebuilt locally. Project-scope entries can be keyed by git remote (`remote:<url>`) so the same project matches at different paths on different machines.
+
+**V3.5 — installer polish (done).** Two setup-time improvements, both prompt-only (no per-harness code):
+
+- **Reuse an existing data repo.** Before creating one, the installer reuses `sync.remote` when this machine is already configured, asks whether the user has a Poppy data repo from another machine, and otherwise checks the user's account for one (a `library/` tree plus the Poppy `.gitignore` header). It offers to reuse what it finds and never adopts a repo without explicit confirmation. `poppy sync status` points at the same path when sync is not initialized.
+- **Model selection for miner and writer.** The miner is the quality bottleneck (long-context judgment across many sessions, tool use); the writer is a constrained rewrite of one accepted candidate. The installer lists the models it can actually use, proposes concrete options with cost/quality trade-offs (one model for both / strong miner + cheap writer / strongest for both, or the CLI default), gets the user's approval, bakes model flags into `agent.miner.cmd` and `agent.writer.cmd`, and verifies both with `poppy doctor --agent`.
 
 **V4 — productize.** More sources verified by the installer, packaging, remote UI option, publishing flow from the private library to a public skills repo.
 

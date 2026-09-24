@@ -54,6 +54,8 @@ rejected/invalid-*.json
 
 
 def git(home: Path, args: list[str], check: bool = False, timeout: int = LOCAL_TIMEOUT):
+    if not home.is_dir():
+        raise PoppyError(f"poppy home does not exist: {home} — run `poppy init` first")
     env = dict(os.environ)
     env.setdefault("GIT_TERMINAL_PROMPT", "0")
     env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
@@ -78,6 +80,8 @@ def git(home: Path, args: list[str], check: bool = False, timeout: int = LOCAL_T
 
 def repo_exists(home: Path) -> bool:
     """True when *home* itself is the root of a git repo (not inside one)."""
+    if not home.is_dir():
+        return False
     proc = git(home, ["rev-parse", "--show-toplevel"])
     if proc.returncode != 0:
         return False

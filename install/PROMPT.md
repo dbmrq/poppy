@@ -71,6 +71,21 @@ poppy config set agent.writer.cmd '["<agent>", "...", "{prompt}"]'
 
 If the CLI reads stdin instead of taking a prompt argument, omit the placeholder. `{prompt_file}` substitutes a temp file path. Then run `poppy doctor --agent`; both agent tests must pass.
 
+### Choose models for the miner and writer
+
+The two roles are not equally hard, so do not pick models by accident:
+
+- **Miner** — reads many sessions, decides what is worth keeping, and writes candidates. This is the quality bottleneck and the expensive run: it needs a long context and reliable tool use.
+- **Writer** — turns one accepted candidate plus its evidence into a `SKILL.md`. Shorter and more constrained; a mid-tier model is usually enough.
+
+Find the models you can actually use (ask your own CLI — e.g. a `models` subcommand — and check which providers are authenticated), then propose 2–3 concrete options and let the user approve one:
+
+1. one capable model for both roles (simplest; the default if the user is unsure),
+2. a strong model for the miner and a cheaper one for the writer (best cost/quality split),
+3. the strongest model available for both (best quality, highest cost).
+
+Keeping your CLI's default model is also fine if the user prefers. Very cheap models tend to produce candidates that waste review time — the evidence gate catches invented quotes, not weak judgment — so if the user is cost-sensitive, split the roles rather than downgrading the miner. Whatever you choose must run non-interactively and use tools. Put the model flag in both configured commands, make sure `poppy doctor --agent` still passes, and report which models you chose and why.
+
 ## 4. Skills directories
 
 `poppy init` auto-detected the skill directories that already exist on this machine (e.g. `~/.agents/skills`, `~/.claude/skills`, `~/.config/opencode/skills`, `~/.pi/agent/skills`). Check that the list covers where you actually load skills from, and fix it if not:
@@ -107,18 +122,20 @@ poppy context verify
 
 ## 6. Multi-machine sync (optional)
 
-Ask the user whether they use Poppy on more than one machine. If yes, one **private** git repo becomes the shared library:
+Ask the user whether they use Poppy on more than one machine. If yes, one **private** git repo becomes the shared library. Find out whether that repo already exists before creating anything:
 
-- If the user has none, create an empty private repo (for example `gh repo create poppy-data --private`) and use its URL. Do not initialize it with a README.
-- Then run:
+1. If `~/.poppy/config.json` already has `sync.remote`, reuse it (this machine was configured before).
+2. Ask the user whether they already have a Poppy data repo from another machine; if they give a URL, use it.
+3. Otherwise check their account for one — for example `gh repo list --limit 200 --json name,url,isPrivate,description` — and look for a name or description suggesting Poppy data (`poppy-data`, `poppy-library`, …). A real Poppy data repo contains a `library/` tree and a `.gitignore` starting with `# Machine-local state — never synced`; confirm that before offering it. Never adopt a repo without the user's explicit confirmation, and never touch a repo that is not theirs.
+4. Only if none exists, offer to create an empty private repo (for example `gh repo create poppy-data --private`) — do not initialize it with a README — and use its URL.
+
+Then run (on this and every other machine, with the same URL):
 
 ```bash
 poppy sync init --remote <private-repo-url>
 ```
 
-`~/.poppy` itself becomes the git repo: the library, candidate queue, and clean rejections are tracked; machine-local state (config, sources, mirrors, usage, logs, drafts) is ignored. The command commits, pushes, and materializes mirrors on this machine.
-
-On every other machine, run this same prompt and give the same remote URL — `poppy sync init` pulls the library and mirrors it locally. Automatic sync runs with the schedule in the next step (every `sync.interval_min`, default 30 minutes). Conflicts are never auto-merged: `poppy sync status` explains what to resolve. Skip this step entirely if the user has one machine.
+`~/.poppy` itself becomes the git repo: the library, candidate queue, and clean rejections are tracked; machine-local state (config, sources, mirrors, usage, logs, drafts) is ignored. The command commits, pushes, and materializes mirrors on this machine. Automatic sync runs with the schedule in the next step (every `sync.interval_min`, default 30 minutes). Conflicts are never auto-merged: `poppy sync status` explains what to resolve. Skip this step entirely if the user has one machine.
 
 ## 7. Schedule
 
