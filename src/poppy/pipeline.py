@@ -37,10 +37,12 @@ from .util import (
 def poppy_cmd() -> str:
     import shutil as _shutil
 
+    from .util import launch_command_str
+
     exe = _shutil.which("poppy")
     if exe:
         return exe
-    return str(Path(__file__).resolve().parents[2] / "bin" / "poppy")
+    return launch_command_str()
 
 
 def library_index(home: Path) -> str:

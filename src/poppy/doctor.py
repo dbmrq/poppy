@@ -6,6 +6,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import __version__
 from . import library
 from .agent import test_agent
 from .candidates import list_candidates
@@ -14,6 +15,7 @@ from .schedule import status as schedule_status
 from .skills import load_manifest, skills_dir_paths
 from .sources import load_sources
 from .sync import status as sync_status
+from .update import install_mode
 from .util import PoppyError
 
 
@@ -29,6 +31,9 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
     checks.append(
         Check("python", "ok" if sys.version_info >= (3, 10) else "fail", sys.version.split()[0])
     )
+    mode = install_mode()
+    label = {"pipx": "pipx install", "checkout": "source checkout", "pip": "pip install"}[mode]
+    checks.append(Check("install", "ok", f"{label} · poppy {__version__}"))
 
     if not config_path(home).exists():
         checks.append(Check("config", "fail", f"missing {config_path(home)} — run `poppy init`"))

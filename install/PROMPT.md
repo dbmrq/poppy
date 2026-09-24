@@ -2,16 +2,32 @@
 
 You are an AI coding agent. Install Poppy — a weekly skill-mining system — for yourself on this machine. Poppy is harness-agnostic: **you** are the harness-specific part. Work through the steps in order and verify each one before moving on. Ask the user only for things you cannot detect (schedule yes/no, lookback window). Keep messages short.
 
-If `~/.poppy` already exists, treat this as an update: read the existing config first and preserve the user's choices.
+If `~/.poppy` already exists, treat this as an update: read the existing config first and preserve the user's choices. If `poppy` is already on PATH, run `poppy update` and `poppy init` (step 1) instead of reinstalling.
 
 ## 1. Install the tool
 
+Prefer an isolated install (no sudo) and verify it before moving on:
+
 ```bash
-git clone https://github.com/dbmrq/poppy.git ~/.local/share/poppy
-~/.local/share/poppy/bin/poppy init
+# preferred: pipx
+command -v pipx >/dev/null && pipx install git+https://github.com/dbmrq/poppy.git
 ```
 
-Make `poppy` available on PATH (symlink `~/.local/share/poppy/bin/poppy` into `~/.local/bin`, or add it to the shell profile; report what you did). Verify with `poppy --version`.
+If pipx is unavailable, use `python3 -m pip install --user git+https://github.com/dbmrq/poppy.git` (or `pip install` inside a virtualenv). If neither works — no pip, or an externally-managed Python — fall back to a checkout:
+
+```bash
+git clone --depth 1 https://github.com/dbmrq/poppy.git ~/.local/share/poppy
+~/.local/share/poppy/bin/poppy --version
+```
+
+Then initialize and verify:
+
+```bash
+poppy --version
+poppy init
+```
+
+Make sure `poppy` is on PATH (pipx and `pip --user` do this automatically; for the checkout, symlink `~/.local/share/poppy/bin/poppy` into `~/.local/bin` or add it to the shell profile; report what you did).
 
 ## 2. Discover transcript sources
 

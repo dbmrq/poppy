@@ -6,19 +6,19 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
-from .util import PoppyError, atomic_write_text
+from .util import PoppyError, atomic_write_text, launch_command, launch_command_str
 
 MINE_LABEL = "poppy-mine"
 SYNC_LABEL = "poppy-sync"
-BIN_PATH = Path(__file__).resolve().parents[2] / "bin" / "poppy"
 
 MINE_SERVICE = """[Unit]
 Description=Poppy: mine recent agent sessions for reusable skills
 
 [Service]
 Type=oneshot
-ExecStart={python} {bin} mine --quiet
+ExecStart={cmd} mine --quiet
 Environment=POPPY_HOME={home}
 Nice=10
 """
@@ -40,7 +40,7 @@ Description=Poppy: sync the library with its private git remote
 
 [Service]
 Type=oneshot
-ExecStart={python} {bin} sync run --quiet
+ExecStart={cmd} sync run --quiet
 Environment=POPPY_HOME={home}
 SuccessExitStatus=1
 Nice=10
@@ -58,54 +58,44 @@ RandomizedDelaySec=120
 WantedBy=timers.target
 """
 
-MINE_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.poppy.mine</string>
+  <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{python}</string>
-    <string>{bin}</string>
-    <string>mine</string>
-    <string>--quiet</string>
-  </array>
+{program_arguments}  </array>
   <key>EnvironmentVariables</key>
   <dict><key>POPPY_HOME</key><string>{home}</string></dict>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Weekday</key><integer>1</integer>
-    <key>Hour</key><integer>9</integer>
-    <key>Minute</key><integer>0</integer>
-  </dict>
-  <key>StandardOutPath</key><string>{log}</string>
+{schedule}  <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
 </dict>
 </plist>
 """
 
-SYNC_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.poppy.sync</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>{python}</string>
-    <string>{bin}</string>
-    <string>sync</string>
-    <string>run</string>
-    <string>--quiet</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict><key>POPPY_HOME</key><string>{home}</string></dict>
-  <key>RunAtLoad</key><true/>
-  <key>StartInterval</key><integer>{interval_sec}</integer>
-  <key>StandardOutPath</key><string>{log}</string>
-  <key>StandardErrorPath</key><string>{log}</string>
-</dict>
-</plist>
+MINE_CALENDAR = """  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>1</integer>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
 """
+
+SYNC_INTERVAL = """  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>{interval_sec}</integer>
+"""
+
+
+def _plist(label: str, args: list[str], home: Path, log: Path, schedule_xml: str) -> str:
+    program_arguments = "".join(f"    <string>{xml_escape(part)}</string>\n" for part in args)
+    return PLIST_TEMPLATE.format(
+        label=label,
+        program_arguments=program_arguments,
+        home=xml_escape(str(home)),
+        schedule=schedule_xml,
+        log=xml_escape(str(log)),
+    )
 
 
 def _systemd_user_available() -> bool:
@@ -160,12 +150,12 @@ def launchd_path(name: str) -> Path:
 
 
 def cron_line(home: Path) -> str:
-    return f"0 9 * * 1 {sys.executable} {BIN_PATH} mine --quiet  # poppy: weekly skills mining"
+    return f"0 9 * * 1 {launch_command_str()} mine --quiet  # poppy: weekly skills mining"
 
 
 def sync_cron_line(home: Path, cfg: dict) -> str:
     interval = sync_interval_minutes(cfg)
-    return f"*/{interval} * * * * {sys.executable} {BIN_PATH} sync run --quiet  # poppy: library sync"
+    return f"*/{interval} * * * * {launch_command_str()} sync run --quiet  # poppy: library sync"
 
 
 def install(
@@ -186,11 +176,11 @@ def install(
         files: dict[str, str] = {}
         if include_mine:
             service_path, timer_path = systemd_paths(MINE_LABEL)
-            files[str(service_path)] = MINE_SERVICE.format(python=sys.executable, bin=BIN_PATH, home=home)
+            files[str(service_path)] = MINE_SERVICE.format(cmd=launch_command_str(), home=home)
             files[str(timer_path)] = MINE_TIMER
         if include_sync:
             sync_service_path, sync_timer_path = systemd_paths(SYNC_LABEL)
-            files[str(sync_service_path)] = SYNC_SERVICE.format(python=sys.executable, bin=BIN_PATH, home=home)
+            files[str(sync_service_path)] = SYNC_SERVICE.format(cmd=launch_command_str(), home=home)
             files[str(sync_timer_path)] = SYNC_TIMER.format(interval=interval)
         if not files:
             raise PoppyError("nothing to install: mining and sync schedules are both disabled")
@@ -212,16 +202,20 @@ def install(
     if kind == "launchd":
         files = {}
         if include_mine:
-            files[str(launchd_path("mine"))] = MINE_PLIST.format(
-                python=sys.executable, bin=BIN_PATH, home=home, log=home / "logs" / "scheduled.log"
+            files[str(launchd_path("mine"))] = _plist(
+                "com.poppy.mine",
+                [*launch_command(), "mine", "--quiet"],
+                home,
+                home / "logs" / "scheduled.log",
+                MINE_CALENDAR,
             )
         if include_sync:
-            files[str(launchd_path("sync"))] = SYNC_PLIST.format(
-                python=sys.executable,
-                bin=BIN_PATH,
-                home=home,
-                interval_sec=interval * 60,
-                log=home / "logs" / "sync.log",
+            files[str(launchd_path("sync"))] = _plist(
+                "com.poppy.sync",
+                [*launch_command(), "sync", "run", "--quiet"],
+                home,
+                home / "logs" / "sync.log",
+                SYNC_INTERVAL.format(interval_sec=interval * 60),
             )
         if not files:
             raise PoppyError("nothing to install: mining and sync schedules are both disabled")

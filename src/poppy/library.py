@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .frontmatter import dump_frontmatter, parse_frontmatter
 from .util import (
-    REPO_ROOT,
+    DATA_DIR,
     PoppyError,
     atomic_write_text,
     load_json,
@@ -44,7 +44,7 @@ META_ORDER = [
     "trigger",
 ]
 
-BUILTIN_DIR = REPO_ROOT / "builtin"
+BUILTIN_DIR = DATA_DIR / "builtin"
 
 
 @dataclass

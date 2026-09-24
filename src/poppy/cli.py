@@ -16,6 +16,7 @@ from . import propose as propose_mod
 from . import publish as publish_mod
 from . import purge as purge_mod
 from . import sync as sync_mod
+from . import update as update_mod
 from .candidates import drafts_candidate_dir, list_candidates, load_candidate, mark_rejected, save_candidate
 from .config import (
     get_dotted,
@@ -231,6 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="summary of home, queue, and schedule").add_argument(
         "--json", action="store_true"
     )
+    p = sub.add_parser("update", help="update Poppy (pipx, pip, or source checkout) and refresh builtins")
+    p.add_argument("--json", action="store_true")
     sub.add_parser("selftest", help="run the bundled test suite")
     return parser
 
@@ -991,6 +994,24 @@ def cmd_purge(args, home: Path) -> int:
     return 0
 
 
+def cmd_update(args, home: Path) -> int:
+    cfg = load_config(home)
+    result = update_mod.update(home, cfg)
+    if args.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    print(f"updated ({result['mode']}): {result['command']}")
+    if result.get("detail"):
+        print(f"  {result['detail']}")
+    line = f"version: {result.get('version') or '?'}"
+    if result.get("refreshed"):
+        line += " (builtins refreshed)"
+    elif result.get("refresh_error"):
+        line += f" (builtin refresh failed: {result['refresh_error']})"
+    print(line)
+    return 0
+
+
 def cmd_status(args, home: Path) -> int:
     cfg = load_config(home)
     candidates = list_candidates(home)
@@ -1069,8 +1090,14 @@ def cmd_status(args, home: Path) -> int:
 def cmd_selftest(args, home: Path) -> int:
     import unittest
 
+    tests_dir = REPO_ROOT / "tests"
+    if not tests_dir.is_dir():
+        raise PoppyError(
+            "the test suite ships with the source checkout; run "
+            "`python3 -m unittest discover -s tests -t .` there, or use `poppy doctor`"
+        )
     loader = unittest.TestLoader()
-    suite = loader.discover(str(REPO_ROOT / "tests"), pattern="test_*.py", top_level_dir=str(REPO_ROOT))
+    suite = loader.discover(str(tests_dir), pattern="test_*.py", top_level_dir=str(REPO_ROOT))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     return 0 if result.wasSuccessful() else 1
 
@@ -1105,6 +1132,7 @@ def dispatch(args, home: Path) -> int:
         "sync": cmd_sync,
         "publish": cmd_publish,
         "purge": cmd_purge,
+        "update": cmd_update,
         "status": cmd_status,
         "selftest": cmd_selftest,
     }

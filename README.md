@@ -31,13 +31,13 @@ Paste this into your agent:
 
 Or paste the contents of [`install/PROMPT.md`](install/PROMPT.md) directly.
 
-Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
+The agent installs the `poppy-agent` package with pipx (or pip), falling back to a checkout when neither is available; `poppy update` keeps it current whichever way it was installed. Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
 
 ## Requirements
 
-- Python 3.10+ (standard library only — nothing to pip install)
+- Python 3.10+ (the runtime is standard library only — no dependencies)
 - An agent CLI that can run headlessly, for scheduled mining and skill authoring
-- Git (optional; only needed for multi-machine sync)
+- `pipx` (recommended), `pip`, or `git` to install Poppy itself
 
 Works on Linux and macOS. Windows is untested.
 
@@ -73,7 +73,7 @@ poppy purge --yes        # removes the schedule, mirrors, digest wiring, and ~/.
 poppy purge --yes --keep-data   # same, but keeps the library and queue
 ```
 
-Only skills Poppy manages are removed — your own skills are never touched — and the CLI checkout is left in place with a printed command to remove it. Without `--yes`, nothing happens.
+Only skills Poppy manages are removed — your own skills are never touched — and the CLI itself is left in place with a printed removal command (`pipx uninstall poppy-agent`, `pip uninstall poppy-agent`, or removing the checkout). Without `--yes`, nothing happens.
 
 ## Publishing
 
@@ -110,6 +110,7 @@ poppy publish <skill> [--to DIR] [--subdir S] [--commit] [--push] [--force]
                         copy a reviewed skill into a public skills repo
 poppy purge [--yes] [--keep-data]
                         remove Poppy from this machine
+poppy update            update Poppy (pipx, pip, or checkout) and refresh builtins
 poppy status            summary
 ```
 

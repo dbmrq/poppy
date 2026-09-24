@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V4.6** — users operate Poppy through their agent, machines auto-sync on a timer, and `poppy purge` removes everything cleanly. V4 packaging, remote UI, and broader source coverage remain. Earlier phases (V1–V4.5) are done. This document is the persistent design and is updated as phases land.
+Status: **V4.7** — agent-first operation, automatic multi-machine sync, clean uninstall, and a packaged install (`poppy-agent`, pipx/pip/checkout) with self-update. V4 remote UI and broader source coverage remain. Earlier phases (V1–V4.6) are done. This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -59,7 +59,8 @@ Nothing in the loop requires the miner and the user to share a session, a machin
 ### Repository layout
 
 ```
-bin/poppy            entry point (executable)
+bin/poppy            checkout entry point (installed copies use the console script)
+pyproject.toml       packaging: distribution "poppy-agent", console script "poppy"
 src/poppy/           Python 3 stdlib package (no third-party imports)
   cli.py             subcommands
   config.py          ~/.poppy/config.json
@@ -69,16 +70,22 @@ src/poppy/           Python 3 stdlib package (no third-party imports)
   skills.py          SKILL.md validation, install/uninstall, manifest
   agent.py           headless agent invocation ({prompt} / {prompt_file})
   prompts.py         prompt rendering ({{PLACEHOLDER}} substitution)
+  propose.py         mid-session proposals (quote location + validation)
+  publish.py         export a reviewed skill into a public repo checkout
+  purge.py           remove Poppy from a machine
+  update.py          install-appropriate self-update (pipx | pip | checkout)
   doctor.py          environment + installation checks
   schedule.py        systemd user timer | launchd | cron instructions
   sync.py            multi-machine git sync: commit, pull, push, materialize
   ui.py              review UI server (stdlib http.server, localhost only)
-prompts/miner.md     recurrent judgment: find reusable procedures with evidence
-prompts/writer.md    turn one accepted candidate into a SKILL.md
+  __main__.py        python -m poppy
+  data/              runtime data shipped inside the package
+    prompts/         miner.md, writer.md
+    builtin/         builtin skills (poppy, poppy-context, poppy-propose)
+    ui/index.html    review UI (no external assets)
 install/PROMPT.md    the copy-paste installer prompt (the product's front door)
-ui/index.html        review UI (no external assets)
 examples/            example source configurations
-tests/               fixtures + stdlib unittest
+tests/               fixtures + stdlib unittest (source checkout only)
 ```
 
 ### State layout (`~/.poppy`, override with `POPPY_HOME`)
@@ -254,11 +261,13 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 - **Automatic sync is the default.** `poppy sync init` installs/refreshes the sync timer itself (systemd/launchd; on cron-only systems it prints the line), so machines sync without being prompted. `--no-schedule` opts out, `sync.interval_min` controls the cadence (default 30), and `poppy sync status` reports whether auto-sync is live.
 - **Complete uninstall.** `poppy purge` prints a plan; `--yes` removes the schedule, Poppy's mirrored skills, the digest wiring blocks, and `~/.poppy`; `--keep-data` removes the integration but keeps the library and queue. Unmanaged skills are never touched, the CLI checkout is left in place with an explicit removal command (it may be the thing running the purge), and the `poppy` skill requires an informed decision before the agent runs it.
 
+**V4.7 — packaging (done).** Poppy installs as a normal Python distribution (`poppy-agent`; the console script stays `poppy`) with all runtime data — prompts, builtin skills, review UI — shipped inside the package, so an installed copy is self-contained. The installer prompt prefers `pipx install git+https://github.com/dbmrq/poppy.git`, falls back to pip, then to a checkout; `poppy update` detects the install mode and runs the right command, then refreshes the builtin skills with the new code; `poppy doctor` reports the install mode and version; `poppy purge` prints the matching removal command. Schedulers use the checkout's `bin/poppy` or `python -m poppy` depending on how Poppy was installed, and CI installs the built package into a fresh venv and smoke-tests it.
+
 ### Nice-to-haves (recorded, not yet built)
 
 - **Mid-session proposals:** a small `poppy propose` CLI plus a builtin skill so an interactive agent can file a candidate (with evidence) the moment it learns something, instead of waiting for the scheduled miner. Must reuse the same validation (quotes, secrets, dedupe) and land in the same queue.
 - **Miner follow-ups:** track entry usage from transcripts (a skill loaded mid-session is visible in the session JSON) so decay can use real usage rather than age alone.
-- **Packaging:** `pipx`/single-file install, a Homebrew tap, and a `poppy doctor` check for outdated installs.
+- **Packaging follow-ups:** a Homebrew tap, PyPI publishing, and a `poppy doctor` check for available updates.
 
 ## 12. Long game: the seven rules
 

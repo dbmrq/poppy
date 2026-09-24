@@ -18,9 +18,9 @@ from .candidates import (
 )
 from .pipeline import accept, discard_draft
 from .skills import archive_skill, install_draft, restore_skill
-from .util import PoppyError, REPO_ROOT, tail
+from .util import DATA_DIR, PoppyError, REPO_ROOT, tail
 
-INDEX_HTML = REPO_ROOT / "ui" / "index.html"
+INDEX_HTML = DATA_DIR / "ui" / "index.html"
 QUEUE_STATUSES = {"pending", "writing", "draft", "draft_invalid", "draft_failed", "writer_rejected"}
 
 

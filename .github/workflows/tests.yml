@@ -19,3 +19,26 @@ jobs:
         run: python3 -m compileall -q src bin
       - name: Run the test suite
         run: python3 -m unittest discover -s tests -t .
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the package into a fresh venv
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet .
+      - name: Verify entry points and packaged data
+        run: |
+          /tmp/venv/bin/poppy --version
+          /tmp/venv/bin/python -m poppy --version
+          /tmp/venv/bin/python -c "from poppy.util import DATA_DIR; assert (DATA_DIR/'prompts'/'miner.md').is_file(); assert (DATA_DIR/'ui'/'index.html').is_file(); assert (DATA_DIR/'builtin'/'poppy'/'SKILL.md').is_file(); print('packaged data ok')"
+      - name: Smoke-test an installed copy
+        run: |
+          POPPY_HOME=/tmp/poppy-home /tmp/venv/bin/poppy init
+          POPPY_HOME=/tmp/poppy-home /tmp/venv/bin/poppy sources add --json '{"name":"fixtures","type":"files","path":"tests/fixtures/jsonl","glob":"*.jsonl"}'
+          POPPY_HOME=/tmp/poppy-home /tmp/venv/bin/poppy mine --dry-run
+          POPPY_HOME=/tmp/poppy-home /tmp/venv/bin/poppy library list

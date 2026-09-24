@@ -45,6 +45,7 @@ JSON.
 | "Learn from my recent work" | `poppy mine --json` (invokes the miner agent; can take minutes) |
 | "Sync my machines" | `poppy sync run --json`; automatic sync runs on the timer `poppy sync init` installed (`poppy sync status` shows it). If it exits 2, resolve the conflict it reports |
 | "Share this skill" | `poppy publish <name> --to <checkout>`, review the warnings, then `--commit [--push]` only after approval |
+| "Update Poppy" | `poppy update` (handles pipx, pip, and checkout installs; refreshes the builtin skills) |
 | "Uninstall Poppy" | `poppy purge` prints the plan; `poppy purge --yes` applies it, `--keep-data` keeps the library. Only after an explicit, informed decision |
 | "Is Poppy healthy?" | `poppy doctor --json`, `poppy status --json` |
 | "Why did mining miss X?" | `poppy sessions search "<term>" --json`; mining is bounded by the lookback window and the candidate cap |

@@ -6,12 +6,33 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_DIR = Path(__file__).resolve().parent
+DATA_DIR = PACKAGE_DIR / "data"
+REPO_ROOT = PACKAGE_DIR.parents[1]  # the checkout root when running from a source tree
+
+
+def launch_command() -> list[str]:
+    """argv prefix that runs Poppy with the current interpreter.
+
+    A source checkout uses its ``bin/poppy`` script; an installed copy (pip or
+    pipx) has no bin directory, so it runs ``python -m poppy`` from the
+    environment that provides it.
+    """
+    bin_path = REPO_ROOT / "bin" / "poppy"
+    if bin_path.is_file():
+        return [sys.executable, str(bin_path)]
+    return [sys.executable, "-m", "poppy"]
+
+
+def launch_command_str() -> str:
+    return " ".join(shlex.quote(part) for part in launch_command())
 
 
 class PoppyError(Exception):

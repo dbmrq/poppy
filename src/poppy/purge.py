@@ -8,13 +8,13 @@ with instructions, since it may be the thing running the command.
 from __future__ import annotations
 
 import shutil
-import sys
 from pathlib import Path
 
 from . import digest
 from .schedule import uninstall as schedule_uninstall
 from .skills import load_manifest, remove_mirrors
-from .util import REPO_ROOT, PoppyError
+from .update import install_mode
+from .util import PACKAGE_DIR, REPO_ROOT, PoppyError
 
 
 def plan(home: Path, cfg: dict) -> dict:
@@ -29,14 +29,17 @@ def plan(home: Path, cfg: dict) -> dict:
 
 
 def _cli_hint() -> dict:
-    hint: dict = {"path": str(REPO_ROOT), "command": None}
-    if "pipx" in str(Path(sys.prefix)):
-        hint["command"] = "pipx uninstall poppy"
-    elif (REPO_ROOT / ".git").is_dir():
+    mode = install_mode()
+    hint: dict = {"path": str(REPO_ROOT if mode == "checkout" else PACKAGE_DIR), "command": None}
+    if mode == "pipx":
+        hint["command"] = "pipx uninstall poppy-agent"
+    elif mode == "checkout":
         hint["command"] = (
             f"rm -rf {REPO_ROOT}  # and remove the poppy symlink from your PATH "
             "(for example ~/.local/bin/poppy)"
         )
+    else:
+        hint["command"] = "pip uninstall poppy-agent"
     return hint
 
 
