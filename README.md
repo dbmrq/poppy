@@ -58,7 +58,7 @@ poppy ui                review queue + library (localhost only)
 poppy accept <id>       skill: run writer agent; memory/rule: accept into library
 poppy install <id>      install a validated skill draft (library + mirrors)
 poppy uninstall <name>
-poppy context [--json]  print memories and rules that apply here
+poppy context [--brief] [--json]  print memories and rules that apply here
 poppy library list|show|verify|pin|unpin|archive|restore|adopt
 poppy decay             scan for stale entries; resolve in the UI
 poppy doctor [--agent]  verify the installation

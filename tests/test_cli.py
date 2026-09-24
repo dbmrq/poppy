@@ -70,6 +70,9 @@ class TestCli(unittest.TestCase):
         code, output = self.run_cli("context")
         self.assertEqual(code, 0, output)
 
+        code, output = self.run_cli("context", "--brief")
+        self.assertEqual(code, 0, output)
+
         code, output = self.run_cli("decay")
         self.assertEqual(code, 0, output)
 

@@ -11,7 +11,7 @@ from .agent import test_agent
 from .candidates import list_candidates
 from .config import config_path, load_config
 from .schedule import status as schedule_status
-from .skills import load_manifest, skills_dir_entries
+from .skills import load_manifest, skills_dir_paths
 from .sources import load_sources
 from .util import PoppyError
 
@@ -59,9 +59,9 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
     dirs = cfg.get("skills_dirs") or []
     if not dirs:
         checks.append(Check("skills_dirs", "fail", "none configured — nothing could be installed"))
-    for entry, mode in skills_dir_entries(cfg):
+    for entry in skills_dir_paths(cfg):
         path = Path(entry).expanduser()
-        label = f"skills_dir:{entry}" + (f" ({mode})" if mode != "copy" else "")
+        label = f"skills_dir:{entry}"
         if path.is_dir():
             checks.append(Check(label, "ok", "exists"))
         elif path.parent.is_dir():

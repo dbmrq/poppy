@@ -128,6 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("context", help="print memories and rules that apply here")
     p.add_argument("--cwd", help="directory to resolve project scope for (default: cwd)")
+    p.add_argument("--brief", action="store_true", help="compact output for injection (capped; empty when nothing applies)")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("library", help="inspect and manage the canonical library")
@@ -438,12 +439,39 @@ def cmd_installed(args, home: Path) -> int:
     return 0
 
 
+def _first_sentence(text: str, limit: int = 240) -> str:
+    paragraph = (text or "").strip().split("\n\n")[0].replace("\n", " ")
+    return tail(paragraph, limit)
+
+
+def _brief_text(context: dict) -> str:
+    lines = [f"Poppy context ({context['host']} · {context['cwd']})"]
+    if context["rules"]:
+        lines.append("Rules (always apply):")
+        for entry in context["rules"]:
+            lines.append(f"- [{entry['scope']}] {entry['title']}: {_first_sentence(entry.get('body', ''))}")
+    if context["memories"]:
+        lines.append("Memories:")
+        for entry in context["memories"]:
+            lines.append(f"- [{entry['scope']}] {entry['title']}: {_first_sentence(entry.get('body', ''))}")
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
 def cmd_context(args, home: Path) -> int:
     cfg = load_config(home)
     cwd = Path(args.cwd).expanduser() if args.cwd else Path.cwd()
     context = library.build_context(home, cfg, cwd=cwd)
+    if args.brief:
+        context["memories"] = context["memories"][:12]
     if args.json:
         print(json.dumps(context, indent=2))
+        return 0
+    if args.brief:
+        text = _brief_text(context)
+        if text:
+            print(text, end="")
         return 0
     print(f"# Poppy context — {context['host']} — {context['cwd']}")
     sections = (

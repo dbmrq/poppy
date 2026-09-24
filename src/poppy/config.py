@@ -16,7 +16,6 @@ DEFAULT_CONFIG = {
     "min_evidence": 1,
     "decay_after_days": 90,
     "decay_scan": True,
-    "mirror_mode": "copy",
     "skills_dirs": [],
     "agent": {
         "miner": {"cmd": None, "timeout_sec": 1800},

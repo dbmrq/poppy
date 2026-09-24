@@ -23,7 +23,7 @@ __all__ = [
     "adopt_installed",
     "load_manifest",
     "save_manifest",
-    "skills_dir_entries",
+    "skills_dir_paths",
     "manifest_path",
 ]
 
@@ -97,15 +97,19 @@ def save_manifest(home: Path, data: dict) -> None:
     save_json(manifest_path(home), data)
 
 
-def skills_dir_entries(cfg: dict) -> list[tuple[str, str]]:
-    """Resolve skills_dirs config into (path, mode) pairs. Mode: copy | symlink."""
-    out: list[tuple[str, str]] = []
-    default_mode = str(cfg.get("mirror_mode") or "copy")
+def skills_dir_paths(cfg: dict) -> list[str]:
+    """Resolve skills_dirs config into a list of paths.
+
+    Poppy always copies skills, never symlinks them: symlinked skill
+    directories behave inconsistently across harnesses and installers.
+    Dict entries are tolerated for compatibility (their ``path`` is used).
+    """
+    out: list[str] = []
     for item in cfg.get("skills_dirs") or []:
         if isinstance(item, str):
-            out.append((item, default_mode))
+            out.append(item)
         elif isinstance(item, dict) and item.get("path"):
-            out.append((str(item["path"]), str(item.get("mode") or default_mode)))
+            out.append(str(item["path"]))
     return out
 
 
@@ -123,7 +127,7 @@ def _check_mirror_targets(cfg: dict, name: str, managed: dict) -> None:
     """Refuse to clobber directories that poppy does not manage."""
     if name in managed:
         return
-    for entry, _mode in skills_dir_entries(cfg):
+    for entry in skills_dir_paths(cfg):
         destination = Path(entry).expanduser() / name
         if destination.exists() or destination.is_symlink():
             raise PoppyError(
@@ -140,7 +144,7 @@ def mirror_skill(home: Path, cfg: dict, name: str) -> list[str]:
     manifest = load_manifest(home)
     managed = manifest.get("skills", {})
     dirs: list[str] = []
-    for entry, mode in skills_dir_entries(cfg):
+    for entry in skills_dir_paths(cfg):
         root = Path(entry).expanduser()
         root.mkdir(parents=True, exist_ok=True)
         destination = root / name
@@ -151,10 +155,7 @@ def mirror_skill(home: Path, cfg: dict, name: str) -> list[str]:
                 raise PoppyError(
                     f"{destination} already exists and was not installed by poppy; refusing to overwrite"
                 )
-        if mode == "symlink":
-            destination.symlink_to(source)
-        else:
-            shutil.copytree(source, destination, ignore=COPY_IGNORE)
+        shutil.copytree(source, destination, ignore=COPY_IGNORE)
         dirs.append(str(destination))
     return dirs
 

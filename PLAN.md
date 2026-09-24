@@ -194,6 +194,7 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 | Miner hallucinates a quote | candidate discarded at validation | evidence gate; nothing reaches the UI |
 | Harness changes its storage format | source stops resolving | `doctor` / `sources test` flags it; fix is a config edit (re-run the installer prompt) |
 | Transcripts rotate away | evidence still available | excerpts are stored with the candidate at validation time |
+| Agent skips loading memories | context not applied | V2.5 hook injection (harness-side); the skill remains a fallback |
 | Schedule never fires | no new candidates | `poppy schedule status` shows the timer; installer fires one run to prove it |
 | UI unavailable | no effect on data | queue is files on disk; CLI can accept/reject/install |
 
@@ -211,9 +212,16 @@ Rejected candidates are remembered so the miner is not asked to judge them again
 **V2 — memories, rules, and decay (done).** Same mining pipeline, three artifact kinds: `skill`, `memory`, `rule`. Accepted memories and rules become entries in the canonical **library** (`~/.poppy/library/`), surfaced to agents through `poppy context` (a builtin `poppy-context` skill teaches agents when to call it). A deterministic decay scan proposes stale entries (unused for `decay_after_days`, default 90) into the same review queue; nothing is archived without approval, pinning exempts an entry, and archives are restorable. Harness copies are *derived mirrors*:
 
 - **Canonical:** `~/.poppy/library/{skills,memory,rules,archive}` — Poppy-owned, one tree, the thing worth backing up or syncing. Never mixed into user skill directories or user context files.
-- **Mirrors:** `skills_dirs` entries may be a path (copy mode) or `{"path": …, "mode": "symlink"}`; the manifest records provenance so `poppy uninstall` removes only Poppy's own copies.
+- **Mirrors:** skills are **copied** into each configured `skills_dirs` entry (never symlinked — symlinked skill directories behave inconsistently across harnesses and installers). The manifest records provenance so `poppy uninstall` removes only Poppy's own copies.
 - **No user-file writes:** Poppy never edits `AGENTS.md`, memory directories, or any file outside `~/.poppy`. Rules are surfaced on demand via `poppy context`; materializing a managed block into AGENTS.md is explicitly deferred (V3+) to avoid entangling user-managed context files — derive such blocks, never sync them.
 - **Usage tracking:** `poppy context` records `last_used` in `~/.poppy/state/usage.json` (state, not library, so library files stay stable under sync).
+
+**V2.5 — memory delivery (next).** Loading memories through the `poppy-context` skill is *discretionary*: the agent decides whether to invoke it, and agents sometimes won't. Delivery must therefore be harness-side, not agent-side:
+
+- **Primary:** small adapters that run `poppy context --brief` at session start and inject the result — an OpenCode plugin (`session.hook("context")`) and a Pi extension (`before_agent_start`). The harness runs it; the agent cannot skip it. Rules (few, always-on) are injected whole; memories are capped, and the command prints nothing when nothing applies, so injection is a no-op otherwise.
+- **Fallback:** the `poppy-context` skill for harnesses without hooks, plus an optional one-line pointer in the global AGENTS.md that the installer adds only with the user's consent.
+- **Rejected:** injecting everything, and writing memory digests into user context files. Context rot is real; the research consensus is minimal, scoped, on-demand context plus a small always-on rule set.
+- The brief output deliberately omits skills (the harness already lists them) and never includes evidence (available via `poppy library show`).
 
 **V3 — sync + scopes.** One private data repo per user; per-machine inbox namespaces; derived indexes regenerated locally; an automatic sync agent (systemd/launchd) that commits, rebases, pushes, and materializes after every pull. Scopes: user > machine > project > task, resolved at read/install time.
 
