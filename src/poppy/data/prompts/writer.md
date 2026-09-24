@@ -10,6 +10,7 @@ You are writing **one Agent Skill** (agentskills.io format) from an accepted can
 
 {{EVIDENCE_BLOCK}}
 
+{{INSTRUCTIONS_BLOCK}}
 ## Output
 
 Write exactly one file:

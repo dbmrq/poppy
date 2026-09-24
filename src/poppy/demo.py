@@ -661,6 +661,12 @@ class DemoBackend:
             return {"ok": True, "status": "active", "entry": entry}
         if candidate.get("status") == "writing":
             raise PoppyError("a writer run is already in progress for this candidate")
+        if "instructions" in payload:  # reviewer steering; empty clears a stored note
+            steering = str(payload.get("instructions") or "").strip()
+            if steering:
+                candidate["writer_instructions"] = steering[:1000]
+            else:
+                candidate.pop("writer_instructions", None)
         candidate["status"] = "writing"
         for key in ("error", "draft_errors", "writer_rejection"):
             candidate.pop(key, None)

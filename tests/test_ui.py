@@ -13,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from poppy import demo, library, ui  # noqa: E402
+from poppy.candidates import save_candidate  # noqa: E402
 from poppy.config import load_config  # noqa: E402
 from poppy.util import PoppyError, ensure_home_layout  # noqa: E402
 
@@ -83,6 +84,15 @@ class TestUiServer(unittest.TestCase):
         status, body = self.request(server, "/", headers=self.basic("secret"))
         self.assertEqual(status, 200)
         self.assertIn("<html", body.lower())
+
+    def test_accept_forwards_rewrite_instructions_to_the_writer(self):
+        save_candidate(self.home, {**CANDIDATE, "id": "cand-skill", "kind": "skill", "status": "pending"})
+        with mock.patch.object(ui.threading, "Thread") as thread:
+            result = ui.handle_action(
+                self.home, self.cfg, "accept", {"id": "cand-skill", "instructions": "be terse"}
+            )
+        self.assertEqual(result, {"ok": True, "status": "writing"})
+        self.assertEqual(thread.call_args.kwargs["args"][-1], "be terse")
 
     def test_api_state_and_action(self):
         entry = library.create_fact_entry(self.home, CANDIDATE)
@@ -177,6 +187,17 @@ class TestUiDemo(unittest.TestCase):
         candidate = next(c for c in self.state()["candidates"] if c["id"] == "skill-verify-backup")
         self.assertEqual(candidate["status"], "draft")
         self.assertIn("## Steps", candidate["draft_preview"])
+
+    def test_rewrite_instructions_are_stored_and_cleared(self):
+        with mock.patch.object(demo, "WRITER_DELAY", 0.01):
+            self.act("accept", id="skill-verify-backup", instructions="Focus on the wrapper, not the cron entry")
+            time.sleep(0.3)
+            candidate = next(c for c in self.state()["candidates"] if c["id"] == "skill-verify-backup")
+            self.assertEqual(candidate["writer_instructions"], "Focus on the wrapper, not the cron entry")
+            self.act("accept", id="skill-verify-backup", instructions="")
+            time.sleep(0.3)
+        candidate = next(c for c in self.state()["candidates"] if c["id"] == "skill-verify-backup")
+        self.assertNotIn("writer_instructions", candidate)
 
     def test_install_moves_a_draft_into_the_library(self):
         self.act("install", id="skill-tap-check")

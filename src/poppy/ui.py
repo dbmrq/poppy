@@ -69,9 +69,9 @@ def _state(home: Path, cfg: dict) -> dict:
     }
 
 
-def _accept_worker(home: Path, cfg: dict, candidate_id: str) -> None:
+def _accept_worker(home: Path, cfg: dict, candidate_id: str, instructions: str | None = None) -> None:
     try:
-        accept(home, candidate_id, cfg)
+        accept(home, candidate_id, cfg, instructions=instructions)
     except Exception:  # surface failures on the candidate instead of losing them
         try:
             candidate = load_candidate(home, candidate_id)
@@ -98,7 +98,10 @@ def handle_action(home: Path, cfg: dict, action: str, payload: dict) -> dict:
             return {"ok": True, **result}
         if candidate.get("status") == "writing":
             raise PoppyError("a writer run is already in progress for this candidate")
-        thread = threading.Thread(target=_accept_worker, args=(home, cfg, candidate_id), daemon=True)
+        instructions = payload.get("instructions")
+        thread = threading.Thread(
+            target=_accept_worker, args=(home, cfg, candidate_id, instructions), daemon=True
+        )
         thread.start()
         return {"ok": True, "status": "writing"}
 

@@ -123,6 +123,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("accept", help="run the writer agent for a candidate")
     p.add_argument("id")
+    p.add_argument(
+        "--instructions",
+        help="steering note for the writer (a rewrite; an empty string clears a stored note)",
+    )
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("reject", help="reject a candidate (remembered so it is not re-proposed)")
@@ -467,7 +471,7 @@ def cmd_candidates(args, home: Path) -> int:
 
 
 def cmd_accept(args, home: Path) -> int:
-    result = accept(home, args.id)
+    result = accept(home, args.id, instructions=args.instructions)
     status = result.get("status")
     if args.json:
         print(json.dumps(result, indent=2))

@@ -45,9 +45,9 @@ scheduler (weekly) ──▶ `poppy mine`
         │                 miner writes candidate JSON into the inbox
         │                 poppy validates: schema, evidence quotes, secrets, duplicates
         ▼
-`poppy ui` (localhost) ── accept / reject candidates
-        │                 accept ─▶ writer agent drafts SKILL.md from evidence
-        │                 draft validated ─▶ install / discard
+`poppy ui` (localhost) ── install / rewrite / reject candidates
+        │                 write ─▶ writer agent drafts SKILL.md from evidence
+        │                 draft validated ─▶ install (accept) / rewrite with steering
         ▼
 installed skills ── copied into the configured skills directories
 ```
@@ -267,6 +267,8 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 **V4.9 — installer self-sufficiency, no per-harness matrix (done).** Source discovery is a procedure, not a list: the installer prompt walks any harness through finding its own transcript store (own CLI export commands first, then the conventional data directories, then per-session files → SQLite → single history file), configuring it with the three generic readers, and proving it with `poppy sources test` plus a real end-to-end read. Awkward shapes — one history file for everything, or an exotic format — are handled by a small read-only extractor configured as a `command` source, kept in `~/.poppy/sources/`. The table of known harnesses is explicitly labeled examples/shapes, not a support list: adding a harness is something that harness's own agent does at install time, in the prompt, not in Poppy's code.
 
 **V4.10 — release pipeline (done).** Publishing is tag-driven: bump `__version__`, tag `vX.Y.Z`, and the `release` workflow checks the tag against the package version, builds the sdist and wheel, publishes to PyPI with trusted publishing (OIDC — no tokens), renders the Homebrew formula from the sdist's PyPI URL and sha256, and creates a GitHub release with all artifacts. The tap (`dbmrq/homebrew-tap`) keeps `Formula/poppy-ai.rb` current from PyPI with a daily secret-free workflow; `poppy update --check` reports whether a newer version exists (PyPI for pip/pipx installs, upstream commits for checkouts) and `poppy update` applies it; the installer prompt prefers `pipx install poppy-ai` with the git URL as fallback. One-time setup (a PyPI pending trusted publisher and the `dbmrq/homebrew-tap` formula) is documented in `packaging/README.md`.
+
+**V4.11 — a calmer review flow + legend (done).** The review UI was collapsed to three choices per card — install, rewrite, reject: "discard draft" is gone (the CLI keeps `discard` as a primitive for agents), the pending-skill action is "Write skill" (no double accept before Install), and failed/invalid/writer-rejected drafts offer "Rewrite…" instead of a separate retry. `poppy accept <id> --instructions "<what to change>"` (and the rewrite box in the UI) carries reviewer steering into the writer prompt and stores it on the candidate (`writer_instructions`, capped, cleared by an empty note) so the box prefills on the next rewrite. A Legend button in the header explains every option — install/rewrite/reject, scope, verify, pin/unpin, archive, uninstall, restore, decay resolutions — opens by default on a first visit, and remembers the choice per browser.
 
 ### Nice-to-haves (recorded, not yet built)
 

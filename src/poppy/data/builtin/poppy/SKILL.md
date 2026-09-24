@@ -39,7 +39,7 @@ JSON.
 | "Show me candidate X" | `poppy candidates show <id> --json` (includes the draft for skills) |
 | "Accept X" | `poppy accept <id> --json`; if it returns `draft`, show it and `poppy install <id>`; memories/rules become active immediately |
 | "Reject X" | `poppy reject <id> --reason "..."` |
-| "Redo that skill draft" | `poppy discard <id>`, then `poppy accept <id>` |
+| "Redo that skill draft" | `poppy accept <id> --instructions "<what to change>"` (re-runs the writer; the note steers the rewrite) |
 | "What do you know about X?" | `poppy library list --json`, `poppy context show --cwd <dir>`; full text with `poppy library show <ref>` |
 | "Forget X" | `poppy library archive <ref>` (restorable) |
 | "Learn from my recent work" | `poppy mine --json` (invokes the miner agent; can take minutes) |

@@ -59,6 +59,11 @@ memory = {
 FAKE_WRITER = '''\
 import os
 import pathlib
+import sys
+
+log = os.environ.get("POPPY_TEST_PROMPT_LOG")
+if log:
+    pathlib.Path(log).write_text(sys.argv[1] if len(sys.argv) > 1 else "", encoding="utf-8")
 
 draft = pathlib.Path(os.environ["POPPY_DRAFT_DIR"])
 draft.mkdir(parents=True, exist_ok=True)
@@ -154,6 +159,24 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(load_candidate(self.home, skill_id)["status"], "pending")
         result = accept(self.home, skill_id)
         self.assertEqual(result["status"], "draft")
+
+        # a rewrite can carry reviewer instructions into the writer prompt and stays on the candidate
+        prompt_log = Path(self.tmp.name) / "prompt.log"
+        os.environ["POPPY_TEST_PROMPT_LOG"] = str(prompt_log)
+        try:
+            result = accept(
+                self.home,
+                skill_id,
+                instructions="Generalize the lockfile example away from the widget project",
+            )
+        finally:
+            os.environ.pop("POPPY_TEST_PROMPT_LOG", None)
+        self.assertEqual(result["status"], "draft")
+        self.assertIn("Generalize the lockfile example away from the widget project", prompt_log.read_text())
+        self.assertEqual(
+            load_candidate(self.home, skill_id)["writer_instructions"],
+            "Generalize the lockfile example away from the widget project",
+        )
 
         candidate = load_candidate(self.home, skill_id)
         name, _dirs = install_draft(self.home, self.cfg, candidate)

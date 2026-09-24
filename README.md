@@ -21,7 +21,7 @@ You don't drive Poppy's CLI; your agent does. The installer puts a few skills in
 - **`poppy-context`** — fetch full memory entries when a headline in your context is relevant.
 - **`poppy-propose`** — capture a durable fact, rule, or procedure the moment you say "remember this"; it lands in the same review queue as mined candidates.
 
-The CLI is the API the agent uses: the actions mirror the review UI (`accept`, `reject`, `discard`, `install`, `archive`, `pin`, `publish`, …), the commands an agent drives take `--json`, and nothing is promoted automatically. `poppy ui` is still there when you want to browse yourself.
+The CLI is the API the agent uses: the actions mirror the review UI (`accept`, `reject`, `install`, `archive`, `pin`, `publish`, …), the commands an agent drives take `--json`, and nothing is promoted automatically. `poppy ui` is still there when you want to browse yourself.
 
 ## Install
 

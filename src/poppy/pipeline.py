@@ -33,6 +33,8 @@ from .util import (
     tail,
 )
 
+INSTRUCTIONS_MAX = 1000
+
 
 def poppy_cmd() -> str:
     import shutil as _shutil
@@ -213,6 +215,7 @@ def accept(
     config: dict | None = None,
     scope: str | None = None,
     project: str | None = None,
+    instructions: str | None = None,
 ) -> dict:
     ensure_home_layout(home)
     cfg = config or load_config(home)
@@ -231,6 +234,13 @@ def accept(
         save_candidate(home, candidate)
         return {"status": "active", "entry": entry.to_dict(library.load_usage(home))}
 
+    if instructions is not None:  # reviewer steering for a (re)write; empty clears it
+        steering = str(instructions).strip()
+        if steering:
+            candidate["writer_instructions"] = steering[:INSTRUCTIONS_MAX]
+        else:
+            candidate.pop("writer_instructions", None)
+
     lock = acquire_lock(home, f"accept-{candidate_id}")
     stamp = time.strftime("%Y%m%d-%H%M%S")
     log_path = home / "logs" / f"accept-{candidate_id}-{stamp}.log"
@@ -244,6 +254,7 @@ def accept(
         candidate["writing_started_at"] = now_iso()
         save_candidate(home, candidate)
 
+        steering = str(candidate.get("writer_instructions") or "").strip()
         prompt = render(
             "writer",
             {
@@ -251,6 +262,14 @@ def accept(
                 "CANDIDATE_JSON": json.dumps(candidate, indent=2),
                 "EVIDENCE_BLOCK": _evidence_block(candidate),
                 "DRAFT_DIR": str(draft_dir),
+                "INSTRUCTIONS_BLOCK": (
+                    "## Reviewer instructions\n\n"
+                    "This is a rewrite: the first draft was not what the reviewer wanted. "
+                    "Follow this steering, over your own judgment where they conflict:\n\n"
+                    f"{steering}\n"
+                    if steering
+                    else ""
+                ),
             },
         )
         result = run_agent(

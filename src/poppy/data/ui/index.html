@@ -27,6 +27,8 @@
     max-width: 880px; margin: 0 auto; padding: 22px 20px 10px;
     display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
   }
+  .header-tools { display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+  .header-tools button { font-size: 12.5px; padding: 3px 10px; }
   .brand { font-weight: 650; letter-spacing: .01em; }
   .brand .dot {
     display: inline-block; width: 9px; height: 9px; border-radius: 50%;
@@ -77,14 +79,27 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
   button.danger { color: var(--danger); }
   button:disabled { opacity: .5; cursor: default; }
-  select, input[type=text] {
+  select, input[type=text], textarea {
     font: inherit; font-size: 13.5px; padding: 6px 10px;
     border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
   }
-  .reject-box { display: none; margin-top: 10px; gap: 8px; }
-  .reject-box.open { display: flex; }
-  .reject-box input { flex: 1; }
+  textarea { resize: vertical; min-height: 40px; }
+  .reject-box, .rewrite-box { display: none; margin-top: 10px; gap: 8px; }
+  .reject-box.open, .rewrite-box.open { display: flex; }
+  .reject-box input, .rewrite-box textarea { flex: 1; }
   .empty { color: var(--muted); font-size: 13.5px; }
+  .legend {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 17px; margin: 16px 0 4px;
+  }
+  .legend h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .legend dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; font-size: 13.5px; }
+  .legend dt { font-weight: 600; white-space: nowrap; }
+  .legend dd { margin: 0; color: var(--muted); }
+  @media (max-width: 560px) {
+    .legend dl { grid-template-columns: 1fr; }
+    .legend dd { margin-bottom: 6px; }
+  }
   .demo {
     margin: 14px 0 0; padding: 8px 13px; border-radius: 8px; font-size: 12.5px;
     color: var(--accent); border: 1px dashed currentColor; background: var(--code-bg);
@@ -103,9 +118,28 @@
 <body>
 <header>
   <div class="brand"><span class="dot"></span>poppy</div>
-  <div class="meta" id="meta">loading…</div>
+  <div class="header-tools">
+    <span class="meta" id="meta">loading…</span>
+    <button id="legend-toggle" aria-expanded="false">Legend</button>
+  </div>
 </header>
 <main>
+  <section class="legend" id="legend" hidden>
+    <h3>What the options do</h3>
+    <dl>
+      <dt>Write skill</dt><dd>The candidate is a good idea — have the writer agent draft the skill.</dd>
+      <dt>Install</dt><dd>Accept the draft as-is: it joins the library and is mirrored into your agents' skill directories.</dd>
+      <dt>Rewrite…</dt><dd>Ask the writer for a new draft, with an optional note to steer it (what was wrong, what to focus on). The note is kept for the next rewrite.</dd>
+      <dt>Reject</dt><dd>No — and don't propose it again. Your reason is remembered (and syncs between machines).</dd>
+      <dt>Accept</dt><dd>Add a memory or rule to the library at the chosen scope (user, machine, or project).</dd>
+      <dt>Verify</dt><dd>The entry is still true: resets the staleness clock without needing a use.</dd>
+      <dt>Pin / Unpin</dt><dd>Pinned entries are never proposed for archiving; unpin lets them age again.</dd>
+      <dt>Archive</dt><dd>Stop using an entry (soft delete): it leaves the digest and your agents, but stays restorable below.</dd>
+      <dt>Uninstall</dt><dd>A skill's Archive: remove it from your agents' skill directories (restorable).</dd>
+      <dt>Restore</dt><dd>Bring an archived entry back into use.</dd>
+      <dt>Decay proposal</dt><dd>A stale entry that nobody used or verified for a while: <em>Archive</em> drops it, <em>Keep</em> marks it verified, <em>Pin</em> keeps it protected from future proposals.</dd>
+    </dl>
+  </section>
   <div class="demo" id="demo" hidden>Demo mode — mock data; actions do not touch your library.</div>
   <section>
     <h2>Queue <span class="count" id="queue-count"></span></h2>
@@ -181,6 +215,20 @@ function rejectBox(candidate) {
     el("button", {
       class: "danger", text: "Reject",
       onclick: () => act("reject", { id: candidate.id, reason: input.value || "rejected in review" }),
+    }),
+    el("button", { text: "Cancel", onclick: () => box.classList.remove("open") }),
+  ]);
+  return box;
+}
+
+function rewriteBox(candidate) {
+  const input = el("textarea", { rows: "2", placeholder: "optional: what should change (the writer follows it)" });
+  input.value = candidate.writer_instructions || "";
+  const box = el("div", { class: "rewrite-box" }, [
+    input,
+    el("button", {
+      class: "primary", text: "Rewrite",
+      onclick: () => act("accept", { id: candidate.id, instructions: input.value }),
     }),
     el("button", { text: "Cancel", onclick: () => box.classList.remove("open") }),
   ]);
@@ -270,25 +318,28 @@ function candidateCard(candidate) {
   const reject = rejectBox(candidate);
   if (status === "pending") {
     actions.append(
-      el("button", { class: "primary", text: "Accept — write skill", onclick: () => act("accept", { id: candidate.id }) }),
+      el("button", { class: "primary", text: "Write skill", onclick: () => act("accept", { id: candidate.id }) }),
       el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
     );
-  } else if (status === "writing") {
+    children.push(actions, reject);
+    return el("article", { class: "card" }, children);
+  }
+  if (status === "writing") {
     actions.append(el("span", { class: "meta" }, [el("span", { class: "spin" }), el("span", { text: "writer agent running…" })]));
-  } else if (status === "draft") {
+    children.push(actions);
+    return el("article", { class: "card" }, children);
+  }
+  const rewrite = rewriteBox(candidate);
+  if (status === "draft") {
     actions.append(
-      el("button", { class: "primary", text: "Install", onclick: () => act("install", { id: candidate.id }) }),
-      el("button", { text: "Discard draft", onclick: () => act("discard_draft", { id: candidate.id }) }),
-      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
-    );
-  } else {
-    actions.append(
-      el("button", { text: "Retry writer", onclick: () => act("accept", { id: candidate.id }) }),
-      el("button", { text: "Discard draft", onclick: () => act("discard_draft", { id: candidate.id }) }),
-      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
+      el("button", { class: "primary", text: "Install", onclick: () => act("install", { id: candidate.id }) })
     );
   }
-  children.push(actions, reject);
+  actions.append(
+    el("button", { text: "Rewrite…", onclick: () => rewrite.classList.add("open") }),
+    el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
+  );
+  children.push(actions, rewrite, reject);
   return el("article", { class: "card" }, children);
 }
 
@@ -377,6 +428,24 @@ async function refresh() {
     $("#meta").textContent = "connection lost — is `poppy ui` still running?";
   }
 }
+
+const legend = $("#legend");
+const legendToggle = $("#legend-toggle");
+try {
+  legend.hidden = (localStorage.getItem("poppy.legend") || "open") === "closed";
+} catch (error) {
+  legend.hidden = false;
+}
+legendToggle.setAttribute("aria-expanded", String(!legend.hidden));
+legendToggle.addEventListener("click", () => {
+  legend.hidden = !legend.hidden;
+  legendToggle.setAttribute("aria-expanded", String(!legend.hidden));
+  try {
+    localStorage.setItem("poppy.legend", legend.hidden ? "closed" : "open");
+  } catch (error) {
+    /* private mode: just don't remember */
+  }
+});
 
 refresh();
 setInterval(refresh, 5000);
