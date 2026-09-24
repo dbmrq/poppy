@@ -44,6 +44,18 @@ brew tap dbmrq/poppy && brew install poppy-ai
 
 `pipx install poppy-ai` remains the recommended path.
 
+## If a release fails part-way
+
+PyPI files are immutable, so never re-run the whole workflow after a successful
+publish. Fix the workflow, then create the GitHub release from the run's
+artifacts:
+
+```bash
+gh run download <run-id> -D /tmp/release-artifacts
+gh release create "vX.Y.Z" /tmp/release-artifacts/dist/* /tmp/release-artifacts/homebrew/*.rb \
+  --generate-notes --title "vX.Y.Z" --repo dbmrq/poppy
+```
+
 ## Local dry run
 
 ```bash
