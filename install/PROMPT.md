@@ -194,10 +194,13 @@ poppy mine --since 7d
 This invokes the miner agent, which may take several minutes. Candidates can be **skills** (reusable procedures), **memories** (facts and preferences), or **rules** (negative constraints). When it finishes, report how many candidates were accepted, then point the user at the review UI:
 
 ```bash
-poppy ui    # http://127.0.0.1:8788
+poppy ui --demo    # optional: the same UI over mock data, nothing is written
+poppy ui           # http://127.0.0.1:8788
 ```
 
-In the UI: accepting a skill runs a writer agent and produces a `SKILL.md`; accepting a memory or rule writes a scoped entry into the Poppy library. Nothing is ever written into the user's own skill directories or context files — harness skill directories only receive mirrors of library skills, and memories/rules are surfaced on demand via `poppy context`.
+In the UI: a skill candidate starts with **Write skill** (drafts it with the writer agent), then **Accept** installs it; a memory or rule is accepted directly at a scope. Each card also offers **Rewrite** (with an optional note that steers the writer) and **Reject** (remembered so it is not proposed again). The ⓘ panel explains every option; the gear opens the settings the installer wrote (miner/writer commands and models, timeouts, decay window, skill directories) with **Run doctor**, **Test agent commands**, and **Trigger miner** actions. Stale entries are archived automatically by decay (pinned ones never are); each gets a card in the queue to **Restore** or confirm.
+
+Nothing is ever written into the user's own skill directories or context files — harness skill directories only receive mirrors of accepted library skills, and memories/rules are surfaced on demand via `poppy context`.
 
 No candidates is an acceptable outcome — say so plainly rather than forcing candidates. If every candidate was rejected as invalid, read `~/.poppy/logs/mine-*.log`, fix the likely cause (usually a source or agent configuration problem), and retry once.
 

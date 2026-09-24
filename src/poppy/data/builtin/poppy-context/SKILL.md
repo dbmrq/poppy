@@ -24,7 +24,7 @@ poppy library show <ref>
 - `poppy context show` prints the entries that apply to this machine and
   project.
 - Poppy entries are evidence-backed but not infallible. If one contradicts what
-  you observe, say so — the user can verify, pin, or archive it in `poppy ui`.
+  you observe, say so — the user can pin it or archive it in `poppy ui`.
 
 If you do not see a Poppy memory index block in your context at all, run
 `poppy context show` instead and tell the user the index is not wired in.

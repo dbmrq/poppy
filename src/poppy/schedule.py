@@ -67,7 +67,7 @@ PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
   <array>
 {program_arguments}  </array>
   <key>EnvironmentVariables</key>
-  <dict><key>POPPY_HOME</key><string>{home}</string></dict>
+  <dict><key>POPPY_HOME</key><string>{home}</string><key>HOME</key><string>{user_home}</string></dict>
 {schedule}  <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
 </dict>
@@ -93,6 +93,7 @@ def _plist(label: str, args: list[str], home: Path, log: Path, schedule_xml: str
         label=label,
         program_arguments=program_arguments,
         home=xml_escape(str(home)),
+        user_home=xml_escape(str(Path.home())),
         schedule=schedule_xml,
         log=xml_escape(str(log)),
     )

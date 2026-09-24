@@ -25,10 +25,24 @@ class TestPackaging(unittest.TestCase):
         self.assertTrue(command[1].endswith("bin/poppy"))
         self.assertIn("bin/poppy", launch_command_str())
 
+    def test_launch_command_installed_prefers_the_console_script(self):
+        script = str(Path(sys.executable).parent / "poppy")
+        with mock.patch("poppy.util.REPO_ROOT", Path("/nonexistent/poppy")), mock.patch(
+            "poppy.util.shutil.which", return_value=script
+        ):
+            self.assertEqual(launch_command(), [script])
+
     def test_launch_command_installed_fallback(self):
-        with mock.patch("poppy.util.REPO_ROOT", Path("/nonexistent/poppy")):
+        with mock.patch("poppy.util.REPO_ROOT", Path("/nonexistent/poppy")), mock.patch(
+            "poppy.util.shutil.which", return_value=None
+        ):
             self.assertEqual(launch_command(), [sys.executable, "-m", "poppy"])
             self.assertIn("-m poppy", launch_command_str())
+        # a different install's script on PATH must not be adopted
+        with mock.patch("poppy.util.REPO_ROOT", Path("/nonexistent/poppy")), mock.patch(
+            "poppy.util.shutil.which", return_value="/somewhere/else/poppy"
+        ):
+            self.assertEqual(launch_command(), [sys.executable, "-m", "poppy"])
 
     def test_install_mode_in_a_checkout(self):
         self.assertEqual(update.install_mode(), "checkout")

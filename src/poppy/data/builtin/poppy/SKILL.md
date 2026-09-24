@@ -40,6 +40,8 @@ JSON.
 | "Accept X" | `poppy accept <id> --json`; if it returns `draft`, show it and `poppy install <id>`; memories/rules become active immediately |
 | "Reject X" | `poppy reject <id> --reason "..."` |
 | "Redo that skill draft" | `poppy accept <id> --instructions "<what to change>"` (re-runs the writer; the note steers the rewrite) |
+| "Why was X archived?" | decay archived it for age — `poppy candidates list --json` shows the card; resolve with `poppy decay --resolve <id> --resolution restore|archive`, or the user can restore it from the UI's Archived list |
+| "Change the mining/writer model" | edit the configured command (`poppy config get agent.miner.cmd`), prove it with `poppy doctor --agent`, or use the settings gear in `poppy ui` |
 | "What do you know about X?" | `poppy library list --json`, `poppy context show --cwd <dir>`; full text with `poppy library show <ref>` |
 | "Forget X" | `poppy library archive <ref>` (restorable) |
 | "Learn from my recent work" | `poppy mine --json` (invokes the miner agent; can take minutes) |

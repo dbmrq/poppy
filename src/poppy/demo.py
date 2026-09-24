@@ -13,7 +13,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import settings
+from . import __version__, settings
 from .util import PoppyError
 
 DEMO_HOME = "~/.poppy  (demo — nothing is read or written)"
@@ -673,7 +673,7 @@ class DemoBackend:
             if action == "doctor":
                 checks = [
                     {"name": "python", "status": "ok", "detail": "3.13.5"},
-                    {"name": "install", "status": "ok", "detail": "pipx install · poppy 0.1.0 (demo)"},
+                    {"name": "install", "status": "ok", "detail": f"pipx install · poppy {__version__} (demo)"},
                     {"name": "sources", "status": "ok", "detail": "1 source(s)"},
                     {"name": "agent.miner", "status": "ok", "detail": "configured"},
                     {"name": "agent.writer", "status": "ok", "detail": "configured"},

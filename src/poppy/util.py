@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sys
 import tempfile
 import time
@@ -18,16 +19,34 @@ DATA_DIR = PACKAGE_DIR / "data"
 REPO_ROOT = PACKAGE_DIR.parents[1]  # the checkout root when running from a source tree
 
 
-def launch_command() -> list[str]:
-    """argv prefix that runs Poppy with the current interpreter.
+def _installed_console_script() -> str | None:
+    """The `poppy` script on PATH, but only when it belongs to this install."""
+    script = shutil.which("poppy")
+    if not script:
+        return None
+    try:
+        if Path(script).resolve().parent == Path(sys.executable).parent:
+            return script
+    except OSError:
+        return None
+    return None
 
-    A source checkout uses its ``bin/poppy`` script; an installed copy (pip or
-    pipx) has no bin directory, so it runs ``python -m poppy`` from the
-    environment that provides it.
+
+def launch_command() -> list[str]:
+    """argv prefix for scheduled runs (systemd, launchd, cron).
+
+    A source checkout runs its ``bin/poppy``. An installed copy prefers the
+    console script on PATH when it demonstrably belongs to this install: pipx
+    and Homebrew keep that path stable across upgrades, while the interpreter
+    path carries a version (``Cellar/poppy-ai/0.2.0/...``) that moves on every
+    upgrade and would leave the scheduler pointing at a deleted interpreter.
     """
     bin_path = REPO_ROOT / "bin" / "poppy"
     if bin_path.is_file():
         return [sys.executable, str(bin_path)]
+    script = _installed_console_script()
+    if script:
+        return [script]
     return [sys.executable, "-m", "poppy"]
 
 
