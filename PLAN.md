@@ -284,7 +284,7 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 
 ### Nice-to-haves (recorded, not yet built)
 
-- **Review by email (agreed, not built).** When candidates land (mined or proposed on the fly), email the owner a short digest — title, kind, one evidence line — with accept/reject links. Keep it dependency-free and easy to set up: reuse the existing `SMTP_*` config (no new service), mint signed single-use tokens bound to the UI token, and never mutate state on a bare GET — the link opens a tiny confirmation page that POSTs the decision, then shows the result. Email is a convenience layer over the same queue, never a second source of truth.
+- **Review by email (agreed, not built).** When candidates land (mined or proposed on the fly), email the owner a short digest — kind, title, one evidence line — with accept/reject links. Keep it dependency-free (stdlib `smtplib`, no mail library) and trivial to configure: read the conventional `SMTP_HOST` / `SMTP_PORT` / `SMTP_FROM` / `SMTP_USER` / `SMTP_PASS` (optional `SMTP_TO`) from the environment or Poppy config, environment winning — the same names the rest of this homelab already uses (`scripts/email_notify.py`), so there is nothing new to install or learn and no secrets in the repo. Links carry signed, single-use tokens bound to the UI token and never mutate state on a bare GET: the link opens a small confirmation page that POSTs the decision and shows the result. Email is a convenience layer over the same queue, never a second source of truth.
 - **Miner follow-ups:** track entry usage from transcripts (a skill loaded mid-session is visible in the session JSON) so decay can use real usage rather than age alone.
 
 ## 12. Long game: the seven rules
