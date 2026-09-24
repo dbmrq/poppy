@@ -2,7 +2,7 @@
 
 _Poppy turns coding-agent session history into reusable skills. It is harness-agnostic by construction: the agent you already use installs it, and an agent mines for it._
 
-Status: **V4.8** — agent-first operation, automatic multi-machine sync, clean uninstall, packaged install (`poppy-ai`, pipx/pip/checkout) with self-update, and a token-protected remote review UI. Still open from V4: broader source coverage and the packaging follow-ups. Earlier phases (V1–V4.7) are done. This document is the persistent design and is updated as phases land.
+Status: **V4.9** — agent-first operation, automatic multi-machine sync, clean uninstall, packaged install (`poppy-ai`, pipx/pip/checkout) with self-update, a token-protected remote review UI, and an installer that discovers any harness's transcripts itself (no support matrix). Still open from V4: the packaging follow-ups. Earlier phases (V1–V4.8) are done. This document is the persistent design and is updated as phases land.
 
 ---
 
@@ -147,7 +147,7 @@ locks/               per-candidate locks (no double writer runs)
 
 ## 6. Transcript access: three tiers
 
-The installer picks the best tier per harness and **verifies it against real sessions**:
+The installer picks the best tier per harness and **verifies it against real sessions**. There is no per-harness support matrix: discovery is a procedure (own CLI → conventional data directories → per-session files → SQLite → single history file), and a harness the prompt has never heard of is handled by the agent that installs Poppy, not by code.
 
 1. **Harness commands** (`type: command`) — prefer the harness's own listing/export commands. Stability is delegated to the harness. `list_cmd` must print a JSON array whose items carry an id (plus optional time/title/cwd); `read_cmd` prints the session text (`{id}` substituted).
 2. **Generic readers** (`type: files`, `type: sqlite`) — JSONL/text directories, or a read-only SQLite connection with two queries (`list_query`, `read_query`; the read query must alias a text column as `text`). Works for most harnesses without per-harness code.
@@ -265,7 +265,9 @@ The digest is regenerated deterministically after every approval, archive, pin, 
 
 **V4.8 — remote review UI (done).** `poppy ui` still binds localhost by default; `--host` binds elsewhere, and a non-loopback bind without a token is refused unless `--insecure` explicitly acknowledges the risk. With a token, every request needs HTTP Basic auth (any username, the token as the password) and POSTs must be `application/json`, so a cross-site form cannot act on the library. The token can come from `ui.token` or `--token`; startup output states the URL and the auth mode. Meant for a LAN address, an SSH tunnel, or an authenticating proxy (Cloudflare Access, Tailscale) — the UI can accept skills, so it is an admin endpoint.
 
-**Still open from V4:** broader source coverage in the installer prompt, plus the packaging follow-ups (Homebrew tap, PyPI publishing, an update-available check).
+**Still open from V4:** the packaging follow-ups (Homebrew tap, PyPI publishing, an update-available check).
+
+**V4.9 — installer self-sufficiency, no per-harness matrix (done).** Source discovery is a procedure, not a list: the installer prompt walks any harness through finding its own transcript store (own CLI export commands first, then the conventional data directories, then per-session files → SQLite → single history file), configuring it with the three generic readers, and proving it with `poppy sources test` plus a real end-to-end read. Awkward shapes — one history file for everything, or an exotic format — are handled by a small read-only extractor configured as a `command` source, kept in `~/.poppy/sources/`. The table of known harnesses is explicitly labeled examples/shapes, not a support list: adding a harness is something that harness's own agent does at install time, in the prompt, not in Poppy's code.
 
 ### Nice-to-haves (recorded, not yet built)
 

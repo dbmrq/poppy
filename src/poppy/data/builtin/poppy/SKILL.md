@@ -50,6 +50,7 @@ JSON.
 | "Is Poppy healthy?" | `poppy doctor --json`, `poppy status --json` |
 | "Review from another device" | `poppy ui --host <addr> --token <secret>` (HTTP Basic). Never bind a non-loopback address without a token |
 | "Why did mining miss X?" | `poppy sessions search "<term>" --json`; mining is bounded by the lookback window and the candidate cap |
+| "Mining finds nothing / a source broke" | `poppy sources list`, `poppy sources test <name>`, `poppy doctor`; if the store moved or is missing, re-run the source-discovery section of the installer prompt |
 
 Notes: `poppy sync run` exits 1 when it synced changes and 2 on conflicts —
 read the JSON/status, not the exit code alone. `poppy ui` is the same review

@@ -34,6 +34,8 @@ DEFAULT_CONFIG = {
 }
 
 COMMON_SKILL_DIRS = (
+    # Detection convenience only, not a support matrix: the installer verifies
+    # this list and the agent adjusts it to wherever *it* loads skills from.
     "~/.agents/skills",
     "~/.config/opencode/skills",
     "~/.claude/skills",

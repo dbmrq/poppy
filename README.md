@@ -31,7 +31,7 @@ Paste this into your agent:
 
 Or paste the contents of [`install/PROMPT.md`](install/PROMPT.md) directly.
 
-The agent installs the `poppy-ai` package with pipx (or pip), falling back to a checkout when neither is available; `poppy update` keeps it current whichever way it was installed. Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
+The agent installs the `poppy-ai` package with pipx (or pip), falling back to a checkout when neither is available; `poppy update` keeps it current whichever way it was installed. The agent also finds its own transcript store — there is no per-harness integration and no support matrix — and verifies it against real sessions before going further. Then review proposals at `http://127.0.0.1:8788` (`poppy ui`).
 
 ## Requirements
 
