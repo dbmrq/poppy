@@ -1,0 +1,2 @@
+{"type": "user", "text": "How do I run just the smoke tests?"}
+{"type": "assistant", "text": "Use `pytest -m smoke --no-header -q` to run only the smoke tests; it finishes in about twenty seconds."}

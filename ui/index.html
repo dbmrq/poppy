@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poppy — review queue</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #faf9f7; --fg: #1d1c1a; --muted: #6f6b64; --card: #ffffff;
+    --border: #e7e4df; --accent: #b4530a; --accent-fg: #ffffff;
+    --ok: #2f7a4d; --warn: #8a6d1f; --danger: #a03030; --code-bg: #f2f0ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --fg: #ecebe8; --muted: #9b978f; --card: #1d1d1c;
+      --border: #2f2e2c; --accent: #e08a3c; --accent-fg: #1d1c1a;
+      --ok: #7fc79a; --warn: #d8bd6a; --danger: #e08a8a; --code-bg: #262524;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    max-width: 860px; margin: 0 auto; padding: 22px 20px 10px;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  }
+  .brand { font-weight: 650; letter-spacing: .01em; }
+  .brand .dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--accent); margin-right: 9px; vertical-align: 1px;
+  }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  main { max-width: 860px; margin: 0 auto; padding: 0 20px 90px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 30px 0 12px; }
+  h2 .count { color: var(--fg); }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 15px 17px; margin-bottom: 12px;
+  }
+  .card h3 { margin: 0; font-size: 16px; line-height: 1.35; }
+  .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .badge {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; color: var(--muted);
+  }
+  .badge.draft { color: var(--ok); border-color: currentColor; }
+  .badge.writing { color: var(--warn); border-color: currentColor; }
+  .badge.draft_invalid, .badge.draft_failed, .badge.writer_rejected { color: var(--danger); border-color: currentColor; }
+  .trigger { color: var(--fg); margin: 10px 0 4px; font-weight: 550; }
+  .summary { color: var(--muted); margin: 4px 0 10px; }
+  details { margin: 8px 0; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  blockquote {
+    margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--border);
+    color: var(--fg); background: var(--code-bg); border-radius: 0 6px 6px 0; white-space: pre-wrap;
+  }
+  .src { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; overflow: auto; font-size: 12.5px; line-height: 1.5;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .note { font-size: 13px; margin: 6px 0; }
+  .note.warn { color: var(--warn); }
+  .note.err { color: var(--danger); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button {
+    font: inherit; font-size: 13.5px; border-radius: 8px; padding: 6px 13px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--fg);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  .reject-box { display: none; margin-top: 10px; gap: 8px; }
+  .reject-box.open { display: flex; }
+  .reject-box input {
+    flex: 1; font: inherit; font-size: 13.5px; padding: 6px 10px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg);
+  }
+  .empty { color: var(--muted); font-size: 13.5px; }
+  .installed-item { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .installed-item:last-child { border-bottom: none; }
+  .installed-item .name { font-weight: 550; }
+  .installed-item .when { color: var(--muted); font-size: 12.5px; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -2px; margin-right: 7px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span>poppy</div>
+  <div class="meta" id="meta">loading…</div>
+</header>
+<main>
+  <section>
+    <h2>Queue <span class="count" id="queue-count"></span></h2>
+    <div id="queue"></div>
+    <p class="empty" id="queue-empty" hidden>Nothing to review. The next mining run fills this in.</p>
+  </section>
+  <section>
+    <h2>Installed <span class="count" id="installed-count"></span></h2>
+    <div id="installed"></div>
+    <p class="empty" id="installed-empty" hidden>No poppy-managed skills yet.</p>
+  </section>
+</main>
+<script>
+const $ = (sel) => document.querySelector(sel);
+
+const STATUS_ORDER = ["draft", "writing", "draft_invalid", "draft_failed", "writer_rejected", "pending"];
+const STATUS_LABEL = {
+  pending: "candidate", writing: "writing", draft: "draft ready",
+  draft_invalid: "draft invalid", draft_failed: "writer failed",
+  writer_rejected: "writer rejected", installed: "installed",
+};
+
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value);
+  }
+  for (const child of [].concat(children)) {
+    if (child == null) continue;
+    node.append(child);
+  }
+  return node;
+}
+
+async function act(action, payload) {
+  const response = await fetch("/api/action", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) alert(data.error || `request failed (${response.status})`);
+  await refresh();
+}
+
+function badge(status) {
+  return el("span", { class: `badge ${status}`, text: STATUS_LABEL[status] || status });
+}
+
+function evidenceBlock(candidate) {
+  const items = candidate.evidence || [];
+  const children = [el("summary", { text: `Evidence (${items.length})` })];
+  for (const item of items) {
+    children.push(
+      el("div", { class: "src", text: `${item.source} · ${item.session}` }),
+      el("blockquote", { text: item.quote })
+    );
+  }
+  return el("details", {}, children);
+}
+
+function rejectBox(candidate) {
+  const input = el("input", { type: "text", placeholder: "reason (optional)" });
+  const confirm = el("button", {
+    class: "danger", text: "Reject",
+    onclick: () => act("reject", { id: candidate.id, reason: input.value || "rejected in review" }),
+  });
+  const cancel = el("button", {
+    text: "Cancel",
+    onclick: () => box.classList.remove("open"),
+  });
+  const box = el("div", { class: "reject-box" }, [input, confirm, cancel]);
+  return box;
+}
+
+function candidateCard(candidate) {
+  const status = candidate.status || "pending";
+  const children = [
+    el("div", { class: "row" }, [el("h3", { text: candidate.title || candidate.id }), badge(status)]),
+  ];
+  if (candidate.trigger) children.push(el("p", { class: "trigger", text: candidate.trigger }));
+  if (candidate.summary) children.push(el("p", { class: "summary", text: candidate.summary }));
+  children.push(evidenceBlock(candidate));
+
+  for (const warning of candidate.warnings || []) {
+    children.push(el("p", { class: "note warn", text: `⚠ ${warning}` }));
+  }
+  if (candidate.draft_errors) {
+    for (const error of candidate.draft_errors) {
+      children.push(el("p", { class: "note err", text: `✗ ${error}` }));
+    }
+  }
+  if (candidate.error) children.push(el("p", { class: "note err", text: `✗ ${candidate.error}` }));
+  if (candidate.writer_rejection) {
+    children.push(el("p", { class: "note warn", text: `Writer declined: ${candidate.writer_rejection}` }));
+  }
+  if (candidate.draft_preview) {
+    children.push(el("details", {}, [
+      el("summary", { text: "Draft SKILL.md" }),
+      el("pre", { text: candidate.draft_preview }),
+    ]));
+  }
+
+  const actions = el("div", { class: "actions" });
+  const reject = rejectBox(candidate);
+  if (status === "pending") {
+    actions.append(
+      el("button", { class: "primary", text: "Accept — write skill", onclick: () => act("accept", { id: candidate.id }) }),
+      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
+    );
+  } else if (status === "writing") {
+    actions.append(el("span", { class: "meta" }, [el("span", { class: "spin" }), el("span", { text: "writer agent running…" })]));
+  } else if (status === "draft") {
+    actions.append(
+      el("button", { class: "primary", text: "Install", onclick: () => act("install", { id: candidate.id }) }),
+      el("button", { text: "Discard draft", onclick: () => act("discard_draft", { id: candidate.id }) }),
+      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
+    );
+  } else {
+    actions.append(
+      el("button", { text: "Retry writer", onclick: () => act("accept", { id: candidate.id }) }),
+      el("button", { text: "Discard draft", onclick: () => act("discard_draft", { id: candidate.id }) }),
+      el("button", { class: "danger", text: "Reject", onclick: () => reject.classList.add("open") })
+    );
+  }
+  children.push(actions, reject);
+
+  return el("article", { class: "card" }, children);
+}
+
+function render(state) {
+  const queue = $("#queue");
+  queue.replaceChildren();
+  const candidates = (state.candidates || []).slice().sort((a, b) => {
+    const order = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
+    return order !== 0 ? order : String(b.created_at).localeCompare(String(a.created_at));
+  });
+  for (const candidate of candidates) queue.append(candidateCard(candidate));
+  $("#queue-empty").hidden = candidates.length > 0;
+  $("#queue-count").textContent = candidates.length ? `· ${candidates.length}` : "";
+
+  const installed = $("#installed");
+  installed.replaceChildren();
+  const skills = Object.entries(state.installed || {});
+  for (const [name, entry] of skills.sort()) {
+    installed.append(el("div", { class: "installed-item" }, [
+      el("div", {}, [
+        el("div", { class: "name", text: name }),
+        el("div", { class: "when", text: `installed ${entry.installed_at || "?"} · ${(entry.dirs || []).length} dir(s)` }),
+      ]),
+      el("button", { class: "danger", text: "Uninstall", onclick: () => act("uninstall", { name }) }),
+    ]));
+  }
+  $("#installed-empty").hidden = skills.length > 0;
+  $("#installed-count").textContent = skills.length ? `· ${skills.length}` : "";
+
+  $("#meta").textContent = `${state.home} · ${(state.skills_dirs || []).join(", ") || "no skills dirs"}`;
+}
+
+async function refresh() {
+  try {
+    const response = await fetch("/api/state");
+    render(await response.json());
+  } catch (error) {
+    $("#meta").textContent = "connection lost — is `poppy ui` still running?";
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

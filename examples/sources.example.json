@@ -1,0 +1,34 @@
+{
+  "sources": [
+    {
+      "name": "opencode",
+      "type": "sqlite",
+      "description": "OpenCode v2 sessions, all projects (verified 2026-09)",
+      "path": "~/.local/share/opencode/opencode.db",
+      "list_query": "SELECT id, title, directory AS cwd, time_updated FROM session_v2 ORDER BY time_updated DESC LIMIT :limit",
+      "read_query": "SELECT CASE WHEN type='user' THEN json_extract(data,'$.text') ELSE (SELECT group_concat(json_extract(value,'$.text'), char(10)) FROM json_each(session_message.data,'$.content') WHERE json_extract(value,'$.type') IN ('text','reasoning')) END AS text FROM session_message WHERE session_id = :id ORDER BY seq"
+    },
+    {
+      "name": "pi",
+      "type": "files",
+      "description": "Pi agent sessions (JSONL)",
+      "path": "~/.pi/agent/sessions",
+      "glob": "**/*.jsonl"
+    },
+    {
+      "name": "claude-code",
+      "type": "files",
+      "description": "Claude Code transcripts (JSONL; note: Claude Code deletes them after cleanupPeriodDays, default 30)",
+      "path": "~/.claude/projects",
+      "glob": "**/*.jsonl",
+      "extensions": [".jsonl"]
+    },
+    {
+      "name": "opencode-command",
+      "type": "command",
+      "description": "OpenCode via its own CLI — current project only; prefer the sqlite source above for all projects",
+      "list_cmd": ["opencode", "session", "list", "--format", "json", "-n", "200"],
+      "read_cmd": ["opencode", "session", "export", "{id}"]
+    }
+  ]
+}

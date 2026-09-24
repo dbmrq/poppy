@@ -1,0 +1,3 @@
+{"type": "user", "text": "The widget build keeps failing on CI. How do I make it reproducible?"}
+{"type": "assistant", "text": "Always pass --frozen-lockfile to the package manager so the widget build is reproducible. That pins every transitive dependency."}
+{"type": "user", "text": "Nice, that worked."}
