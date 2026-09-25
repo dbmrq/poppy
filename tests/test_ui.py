@@ -12,8 +12,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from poppy import demo, library, ui  # noqa: E402
-from poppy.candidates import save_candidate  # noqa: E402
+from poppy import demo, library, mailer, ui  # noqa: E402
+from poppy.candidates import list_candidates, load_candidate, save_candidate  # noqa: E402
 from poppy.config import load_config  # noqa: E402
 from poppy.util import PoppyError, ensure_home_layout  # noqa: E402
 
@@ -217,6 +217,72 @@ class TestUiServer(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertTrue(json.loads(body)["ok"])
+
+
+class TestDecideLinks(unittest.TestCase):
+    """The /decide routes used by notification emails: token-authenticated,
+    read-only on GET, and single-use."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name) / "home"
+        ensure_home_layout(self.home)
+        library.ensure_library(self.home)
+        self.cfg = load_config(self.home)
+        save_candidate(self.home, {**CANDIDATE, "status": "pending"})
+        self.server = ui.build_server(self.home, self.cfg, host="127.0.0.1", port=0, token="secret")
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.tmp.cleanup()
+
+    def request(self, path, method="GET", body=None):
+        url = f"http://127.0.0.1:{self.server.server_address[1]}{path}"
+        data = body.encode("utf-8") if isinstance(body, str) else body
+        headers = {"Content-Type": "application/x-www-form-urlencoded"} if data else {}
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return response.status, response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8")
+
+    def test_get_shows_the_confirm_page_without_changing_anything(self):
+        token = mailer.mint_token(self.home, "cand1", "accept")
+        status, body = self.request(f"/decide?token={token}")
+        self.assertEqual(status, 200)
+        self.assertIn("Prefers minimal dependencies", body)
+        self.assertIn("Accept", body)
+        self.assertEqual(load_candidate(self.home, "cand1")["status"], "pending")
+
+    def test_post_accepts_and_burns_the_token(self):
+        token = mailer.mint_token(self.home, "cand1", "accept")
+        status, body = self.request("/decide", method="POST", body=f"token={token}")
+        self.assertEqual(status, 200)
+        self.assertIn("Accepted", body)
+        self.assertEqual(len(library.list_entries(self.home, kinds=("memory",))), 1)
+        self.assertTrue(mailer.token_used(self.home, token))
+        self.assertEqual(self.request("/decide", method="POST", body=f"token={token}")[0], 410)
+        self.assertEqual(self.request(f"/decide?token={token}")[0], 410)
+
+    def test_reject_records_the_reason(self):
+        token = mailer.mint_token(self.home, "cand1", "reject")
+        status, body = self.request("/decide", method="POST", body=f"token={token}&reason=not+useful")
+        self.assertEqual(status, 200)
+        self.assertIn("Rejected", body)
+        self.assertEqual(list_candidates(self.home), [])
+        payload = json.loads((self.home / "rejected" / "cand1.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["rejection"]["reason"], "not useful")
+
+    def test_bad_expired_and_replayed_tokens_are_refused(self):
+        self.assertEqual(self.request("/decide?token=nope")[0], 410)
+        expired = mailer.mint_token(self.home, "cand1", "accept", ttl_sec=-10)
+        self.assertEqual(self.request(f"/decide?token={expired}")[0], 410)
+        self.assertEqual(self.request("/decide", method="POST", body="token=nope")[0], 410)
+        # the email token is not a substitute for the UI password elsewhere
+        self.assertEqual(self.request("/api/state")[0], 401)
 
 
 class TestUiDemo(unittest.TestCase):

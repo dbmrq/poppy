@@ -174,7 +174,22 @@ The choice is saved in config, so re-running `poppy schedule install` keeps it.
 
 When sync is enabled, this also installs a frequent sync timer. After installing, run `poppy doctor --agent` once more: the schedule check verifies the agent commands resolve under the timer's PATH, which is smaller than your shell's. Do **not** wait for the timers to fire; prove the pipeline with a manual run instead.
 
-## 8. First mining run
+## 8. Review email (optional)
+
+Ask the user whether they want an email when new candidates are queued (from a mining run or a proposal), and which address should receive it. If yes:
+
+- Ask which provider sends their mail, then take that provider's SMTP host, port, and TLS mode **from the provider's own documentation** — do not guess and do not recite a provider list from memory.
+- The credential is an app password from the provider, not the account password. Walk the user through creating one; never ask for or store their account password. `poppy email set` writes it to Poppy's 0600 config.
+
+```bash
+poppy email set --host <host> --port <port> --security <starttls|ssl|none> \
+  --user <login> --from <sender> --to <recipient> --base-url <url the user can reach> --enable
+poppy email test
+```
+
+`poppy email test` sends a real message; read its error and fix the cause instead of guessing. Notification links point at the review UI, so `--base-url` must be an address the user's phone or laptop can reach, and the links only work while `poppy ui` is running on it (it defaults to the UI bind address). Machines that already carry `SMTP_*` environment variables get those as overrides automatically.
+
+## 9. First mining run
 
 Ask the user for a lookback window (default: 7 days for the first run). Then:
 
@@ -195,7 +210,7 @@ Nothing is ever written into the user's own skill directories or context files �
 
 No candidates is an acceptable outcome — say so plainly rather than forcing candidates. If every candidate was rejected as invalid, read `~/.poppy/logs/mine-*.log`, fix the likely cause (usually a source or agent configuration problem), and retry once.
 
-## 9. Report
+## 10. Report
 
 Summarize concisely:
 
@@ -209,6 +224,7 @@ Summarize concisely:
 - how to share a reviewed skill (`poppy publish <name> --to <checkout of a public skills repo>`)
 - how to remove Poppy later (`poppy purge` previews; `poppy purge --yes` removes everything, `--keep-data` keeps the library)
 - memory index wiring: where you wired it, and that `poppy context verify` passed
+- review email (if enabled): the sender and recipient, the `email.base_url` and that it is reachable, and that `poppy email test` passed
 - sync (if enabled): the remote, and that `poppy sync status` is clean
 - anything that failed or could not be verified
 

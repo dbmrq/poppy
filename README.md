@@ -79,6 +79,8 @@ poppy ui --host 0.0.0.0 --token "$(openssl rand -hex 16)"
 
 A non-loopback bind without a token is refused unless you pass `--insecure`. The token can also live in config (`poppy config set ui.token <secret>`) so it stays out of process listings. POSTs must be `application/json`, so a cross-site form cannot act on the library, but the UI can accept skills — treat the port as an admin endpoint. For remote access prefer an SSH tunnel or an authenticating proxy (Cloudflare Access, Tailscale); pass `--insecure` only when the port itself is unreachable from untrusted networks.
 
+New candidates can also be emailed to you with signed, single-use accept/reject links: `poppy email set --host <smtp host> --from <your address> --enable`, then `poppy email test` sends a real message and reports the provider's error if any. Links point at `email.base_url` (defaults to the UI bind address) and work while `poppy ui` is running there; anything in `SMTP_*` environment variables overrides the stored settings.
+
 Want to look around before wiring Poppy into anything? `poppy ui --demo` serves the same UI over mock data: every card and row state, nothing read from or written to disk. The gear beside the info button opens the settings the installer wrote — the miner and writer commands (and the model each one runs), their timeouts, the mining lookback, decay, and the skill directories — and saves only after validating every change (types, ranges, and that the command's program exists on PATH). The same panel can run the doctor checks, test the agent commands, or trigger a mining run and watch it finish — one panel shows at a time, the legend or the settings.
 
 ## Uninstall
@@ -121,6 +123,8 @@ poppy uninstall <name>
 poppy context show|export|wire|unwire|status|verify
 poppy library list|show|verify|pin|unpin|archive|restore|adopt
 poppy decay             archive stale entries (undo from the review queue)
+poppy email show|set|test
+                        optional review notifications (SMTP; agent-configured)
 poppy doctor [--agent]  verify the installation
 poppy schedule install [--mine daily|every-other-day|weekly|smart|off]
 poppy schedule status|uninstall

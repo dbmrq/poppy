@@ -48,6 +48,7 @@ JSON.
 | "Learn from my recent work" | `poppy mine --json` (invokes the miner agent; can take minutes) |
 | "Sync my machines" | `poppy sync run --json`; automatic sync runs on the timer `poppy sync init` installed (`poppy sync status` shows it). If it exits 2, resolve the conflict it reports. If the timer shows `offline`, the scheduler cannot see the credentials: point `sync.env_file` at a readable `KEY=value` file (machine-local) and re-run `poppy sync init` |
 | "Share this skill" | `poppy publish <name> --to <checkout>`, review the warnings, then `--commit [--push]` only after approval |
+| "Email me when candidates arrive" | `poppy email show --json`; `poppy email set --host ... --from ... --to ... --enable`; prove it with `poppy email test`. Decision links point at `email.base_url` and need the UI running there |
 | "Update Poppy" | `poppy update --check` first; then `poppy update` (handles pipx, Homebrew, pip, and checkout installs; refreshes the builtin skills) |
 | "Uninstall Poppy" | `poppy purge` prints the plan; `poppy purge --yes` applies it, `--keep-data` keeps the library. Only after an explicit, informed decision |
 | "Is Poppy healthy?" | `poppy doctor --json`, `poppy status --json` |

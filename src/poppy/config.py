@@ -22,6 +22,21 @@ DEFAULT_CONFIG = {
         "writer": {"cmd": None, "timeout_sec": 900},
     },
     "ui": {"host": "127.0.0.1", "port": 8788, "token": ""},
+    "email": {
+        # Optional review notifications. SMTP only — no provider presets: the
+        # installing agent looks up host/port/TLS for the user's provider and
+        # proves it with `poppy email test`. SMTP_* environment variables
+        # override these values when set.
+        "enabled": False,
+        "host": "",
+        "port": "",              # empty derives from security: 587 / 465 / 25
+        "security": "starttls",  # starttls | ssl | none
+        "user": "",
+        "password": "",
+        "from": "",
+        "to": "",
+        "base_url": "",          # where decision links point (default: the UI bind address)
+    },
     "publish": {"target": "", "subdir": ""},
     "schedule": {
         # PATH embedded into installed timers (set by `poppy schedule install`):

@@ -12,12 +12,14 @@ import base64
 import errno
 import hmac
 import json
+import html
 import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
-from . import decay, digest, library, settings
+from . import decay, digest, library, mailer, settings
 from .candidates import (
     drafts_candidate_dir,
     list_candidates,
@@ -33,6 +35,38 @@ from .skills import archive_skill, install_draft, restore_skill
 from .util import DATA_DIR, PoppyError, REPO_ROOT, load_json, now_iso, save_json, tail
 
 INDEX_HTML = DATA_DIR / "ui" / "index.html"
+PAGE_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Poppy — {title}</title>
+<style>
+  :root {{ color-scheme: light dark; --bg:#faf9f7; --fg:#1d1c1a; --muted:#6f6b64; --card:#ffffff;
+    --border:#e7e4df; --accent:#b4530a; --accent-fg:#ffffff; --danger:#a03030; }}
+  @media (prefers-color-scheme: dark) {{ :root {{ --bg:#141413; --fg:#ecebe8; --muted:#9b978f;
+    --card:#1d1d1c; --border:#2f2e2c; --accent:#e08a3c; --accent-fg:#1d1c1a; --danger:#e08a8a; }} }}
+  body {{ margin:0; background:var(--bg); color:var(--fg);
+    font:15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
+  main {{ max-width:560px; margin:0 auto; padding:32px 20px 60px; }}
+  h1 {{ font-size:19px; margin:6px 0 4px; }}
+  .meta {{ color:var(--muted); font-size:12.5px; text-transform:uppercase; letter-spacing:.06em; margin:0; }}
+  .trigger {{ margin:6px 0 18px; }}
+  form {{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }}
+  input[type=text] {{ flex:1 1 100%; font:inherit; padding:8px 11px; border:1px solid var(--border);
+    border-radius:8px; background:var(--bg); color:var(--fg); }}
+  button, .button {{ font:inherit; font-size:14px; padding:8px 14px; border-radius:8px;
+    border:1px solid var(--border); background:transparent; color:var(--fg); text-decoration:none; cursor:pointer; }}
+  button.primary {{ background:var(--accent); border-color:var(--accent); color:var(--accent-fg); font-weight:600; }}
+  button.danger {{ color:var(--danger); }}
+  a {{ color:var(--accent); }}
+  .note {{ color:var(--muted); font-size:12.5px; margin-top:14px; }}
+</style>
+</head>
+<body><main>{body}</main></body>
+</html>
+"""
 QUEUE_STATUSES = {"pending", "writing", "draft", "draft_invalid", "draft_failed", "writer_rejected"}
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
@@ -94,7 +128,7 @@ def _accept_worker(home: Path, cfg: dict, candidate_id: str, instructions: str |
 def _mine_worker(home: Path, cfg: dict) -> None:
     """Run a mining pass; ``pipeline.mine`` records progress and outcome itself."""
     try:
-        mine(home, config=cfg, quiet=True)
+        mine(home, config=cfg, quiet=True, notify=False)
     except Exception as exc:  # mine() records its own failures; cover pre-run errors too
         state = mine_state(home)
         if state.get("running") or not state.get("error"):
@@ -227,6 +261,81 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, payload, code: int = 200) -> None:
         self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
 
+    def _send_html(self, code: int, body: str) -> None:
+        self._send(code, body.encode("utf-8"), "text/html; charset=utf-8")
+
+    def _page(self, title: str, body: str) -> str:
+        return PAGE_TEMPLATE.format(title=html.escape(title), body=body)
+
+    def _ui_link(self) -> str:
+        url = mailer.base_url(self.cfg)
+        return f'<p class="note">Review everything in the UI: <a href="{html.escape(url)}">{html.escape(url)}</a></p>'
+
+    def _decide_page(self, token: str) -> None:
+        found = mailer.verify_token(self.home, token)
+        if not found or mailer.token_used(self.home, token):
+            self._send_html(410, self._page("Link no longer valid", f"<p>This link is invalid, expired, or already used.</p>{self._ui_link()}"))
+            return
+        candidate_id, action = found
+        try:
+            candidate = load_candidate(self.home, candidate_id)
+        except PoppyError:
+            self._send_html(410, self._page("Already handled", f"<p>That candidate is no longer in the queue.</p>{self._ui_link()}"))
+            return
+        status = str(candidate.get("status") or "pending")
+        verb = "Accept" if action == "accept" else "Reject"
+        reason = (
+            '<input type="text" name="reason" placeholder="reason (optional)">'
+            if action == "reject"
+            else ""
+        )
+        body = (
+            f'<p class="meta">{html.escape(str(candidate.get("kind") or "skill"))} · {html.escape(status)}</p>'
+            f'<h1>{html.escape(str(candidate.get("title") or candidate_id))}</h1>'
+            f'<p class="trigger">{html.escape(str(candidate.get("trigger") or ""))}</p>'
+            '<form method="post" action="/decide">'
+            f'<input type="hidden" name="token" value="{html.escape(token)}">'
+            f"{reason}"
+            f'<button class="primary{"" if action == "accept" else " danger"}" type="submit">{verb}</button>'
+            f'<a class="button" href="{html.escape(mailer.base_url(self.cfg))}">Open the UI</a>'
+            "</form>"
+            '<p class="note">This link works once and expires in 14 days.</p>'
+        )
+        self._send_html(200, self._page(f"{verb} candidate", body))
+
+    def _decide_apply(self, token: str, reason: str) -> None:
+        found = mailer.verify_token(self.home, token)
+        if not found or mailer.token_used(self.home, token):
+            self._send_html(410, self._page("Link no longer valid", f"<p>This link is invalid, expired, or already used.</p>{self._ui_link()}"))
+            return
+        candidate_id, action = found
+        try:
+            if action == "reject":
+                handle_action(
+                    self.home,
+                    self.cfg,
+                    "reject",
+                    {"id": candidate_id, "reason": reason or "rejected from the notification email"},
+                )
+                message = "Rejected. It will not be proposed again."
+            else:
+                result = handle_action(self.home, self.cfg, "accept", {"id": candidate_id})
+                if result.get("status") == "writing":
+                    message = "Accepted. The writer agent is drafting the skill — open the UI to review the draft."
+                elif result.get("status") == "active":
+                    message = "Accepted into the library."
+                else:
+                    message = f"Accepted ({html.escape(str(result.get('status') or 'ok'))})."
+        except PoppyError as exc:
+            self._send_html(400, self._page("Could not apply", f"<p>{html.escape(str(exc))}</p>{self._ui_link()}"))
+            return
+        mailer.consume_token(self.home, token)
+        try:  # keep the always-on digest fresh; it is a cache, never fail the action
+            digest.export(self.home, self.cfg)
+        except Exception:
+            pass
+        self._send_html(200, self._page("Done", f"<p>{message}</p>{self._ui_link()}"))
+
     def _authorized(self) -> bool:
         if not self.token:
             return True
@@ -242,6 +351,10 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self):  # noqa: N802 (http.server API)
+        if urlparse(self.path).path == "/decide":
+            query = parse_qs(urlparse(self.path).query)
+            self._decide_page((query.get("token") or [""])[0])
+            return
         if not self._authorized():
             return
         if self.path in ("/", "/index.html"):
@@ -252,6 +365,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):  # noqa: N802
+        if urlparse(self.path).path == "/decide":
+            # email decision links: the signed token is the credential, and the
+            # decision is bound to one candidate + action (form-encoded so the
+            # confirmation page can post it)
+            length = int(self.headers.get("Content-Length") or 0)
+            form = parse_qs(self.rfile.read(length).decode("utf-8", "replace")) if length else {}
+            self._decide_apply((form.get("token") or [""])[0], (form.get("reason") or [""])[0])
+            return
         if not self._authorized():
             return
         content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()

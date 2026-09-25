@@ -135,6 +135,14 @@ def run_checks(home: Path, with_agent: bool = False) -> list[Check]:
     if cadence and status.get("installed"):
         detail = f"{detail} · miner: {cadence}"
     checks.append(Check("schedule", "ok" if status.get("installed") else "warn", detail))
+
+    from . import mailer
+
+    ready, email_detail = mailer.email_ready(cfg)
+    if not (cfg.get("email") or {}).get("enabled") and not mailer.email_config(cfg).get("enabled"):
+        checks.append(Check("email", "warn", "off (optional) — `poppy email set --enable`"))
+    else:
+        checks.append(Check("email", "ok" if ready else "fail", "configured" if ready else email_detail))
     if status.get("installed") and status.get("kind") in ("launchd", "systemd"):
         stored = scheduled_path(cfg)
         if not stored:

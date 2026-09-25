@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from . import mailer
 from .candidates import save_candidate, validate_raw
 from .sessions import collect_sessions, verify_quote
 from .sources import load_sources
@@ -77,6 +78,7 @@ def propose(home: Path, cfg: dict, payload: dict) -> dict:
     if not candidate:
         raise PoppyError("; ".join(errors))
     save_candidate(home, candidate)
+    mailer.notify_candidates(home, cfg, [candidate["id"]], "proposed in a session")
     return {
         "queued": True,
         "id": candidate["id"],

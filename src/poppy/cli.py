@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from . import decay as decay_mod
+from . import mailer
 from . import digest
 from . import library
 from . import propose as propose_mod
@@ -199,6 +200,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--token", help="require HTTP Basic auth with this token as the password")
     p.add_argument("--insecure", action="store_true", help="allow a non-loopback bind without a token")
     p.add_argument("--demo", action="store_true", help="serve mock data; actions never touch disk")
+
+    p = sub.add_parser("email", help="optional review notifications (SMTP)")
+    esub = p.add_subparsers(dest="email_command", required=True)
+    es = esub.add_parser("show")
+    es.add_argument("--json", action="store_true")
+    eset = esub.add_parser("set", help="set SMTP settings (the installing agent fills these in)")
+    eset.add_argument("--host")
+    eset.add_argument("--port", type=int, help="SMTP port (default derives from --security)")
+    eset.add_argument("--security", choices=("starttls", "ssl", "none"))
+    eset.add_argument("--user")
+    eset.add_argument("--password", help="app password; stored in Poppy's 0600 config")
+    eset.add_argument("--from", dest="sender", help="sender address")
+    eset.add_argument("--to", dest="recipient", help="recipient (defaults to --from)")
+    eset.add_argument("--base-url", help="URL the decision links point at (defaults to the UI bind address)")
+    eset.add_argument("--enable", action="store_true")
+    eset.add_argument("--disable", action="store_true")
+    eset.add_argument("--json", action="store_true")
+    et = esub.add_parser("test", help="send a test message and report the SMTP error, if any")
+    et.add_argument("--to", dest="recipient")
+    et.add_argument("--json", action="store_true")
 
     p = sub.add_parser("doctor", help="check the installation")
     p.add_argument("--agent", action="store_true", help="also test the configured agent commands")
@@ -818,6 +839,88 @@ def cmd_doctor(args, home: Path) -> int:
     return 1 if any(check.status == "fail" for check in checks) else 0
 
 
+def cmd_email(args, home: Path) -> int:
+    cfg = load_config(home)
+    block = dict(cfg.get("email") or {})
+    if args.email_command == "show":
+        view = {key: ("" if key == "password" else value) for key, value in mailer.email_config(cfg).items()}
+        view["password_set"] = bool(mailer.email_config(cfg).get("password"))
+        view["links"] = mailer.base_url(cfg)
+        ready, reason = mailer.email_ready(cfg)
+        view["ready"] = ready
+        view["detail"] = reason
+        if args.json:
+            print(json.dumps(view, indent=2))
+            return 0
+        for key in ("enabled", "host", "port", "security", "user", "from", "to", "links"):
+            print(f"{key + ':':<10} {view.get(key)}")
+        print(f"{'password:':<10} {'set' if view['password_set'] else '(not set)'}")
+        print(f"{'ready:':<10} {'yes' if ready else 'no — ' + reason}")
+        return 0
+    if args.email_command == "set":
+        changes = {
+            "host": args.host,
+            "user": args.user,
+            "password": args.password,
+            "from": args.sender,
+            "to": args.recipient,
+            "base_url": args.base_url,
+        }
+        changed = {key: value for key, value in changes.items() if value is not None}
+        if args.port is not None:
+            if not 1 <= args.port <= 65535:
+                raise PoppyError(f"--port must be between 1 and 65535 (got {args.port})")
+            changed["port"] = args.port
+        if args.security:
+            changed["security"] = args.security
+        if args.enable and args.disable:
+            raise PoppyError("--enable and --disable are mutually exclusive")
+        if not changed and not (args.enable or args.disable):
+            raise PoppyError("nothing to change — pass at least one setting, --enable, or --disable")
+        block.update(changed)
+        if args.enable:
+            block["enabled"] = True
+        if args.disable:
+            block["enabled"] = False
+        cfg["email"] = block
+        ready, reason = mailer.email_ready(cfg)
+        if block.get("enabled") and not ready:
+            raise PoppyError(f"cannot enable email: {reason}")
+        save_config(home, cfg)
+        if args.json:
+            print(json.dumps({"ok": True, "changed": sorted(changed) + (["enabled"] if args.enable or args.disable else [])}))
+            return 0
+        if changed:
+            print(f"email: set {', '.join(sorted(changed))}")
+        if args.enable:
+            print("email: enabled (verify with `poppy email test`)")
+        if args.disable:
+            print("email: disabled")
+        return 0
+    # test
+    probe = dict(block)
+    if args.recipient:
+        probe["to"] = args.recipient
+    probe["to"] = probe.get("to") or probe.get("from")
+    probe_cfg = {**cfg, "email": probe}
+    ready, reason = mailer.email_ready(probe_cfg)
+    if not ready:
+        raise PoppyError(f"cannot send a test message: {reason}")
+    to = str(probe.get("to") or probe.get("from"))
+    subject = f"Poppy test message from {library.host_name()}"
+    body = (
+        f"If you are reading this, review notifications from {home} work.\n\n"
+        f"New candidates will be mailed with one-click accept/reject links.\n"
+        f"Links point at {mailer.base_url(probe_cfg)}; that UI must be running when they are opened.\n"
+    )
+    mailer.send(probe_cfg, subject, body)
+    if args.json:
+        print(json.dumps({"ok": True, "to": to, "subject": subject}))
+        return 0
+    print(f"sent a test message to {to}")
+    return 0
+
+
 def cmd_schedule(args, home: Path) -> int:
     cfg = load_config(home)
     if args.schedule_command == "install":
@@ -1211,6 +1314,7 @@ def dispatch(args, home: Path) -> int:
         "context": cmd_context,
         "library": cmd_library,
         "decay": cmd_decay,
+        "email": cmd_email,
         "ui": cmd_ui,
         "doctor": cmd_doctor,
         "schedule": cmd_schedule,

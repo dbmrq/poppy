@@ -7,7 +7,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import decay, library
+from . import decay, library, mailer
 from . import __version__
 from .agent import run_agent
 from .candidates import (
@@ -141,6 +141,7 @@ def mine(
     quiet: bool = False,
     config: dict | None = None,
     if_due: bool = False,
+    notify: bool = True,
 ) -> dict:
     """Run one mining pass. Only one may run at a time (UI, CLI, or timer).
 
@@ -169,6 +170,13 @@ def mine(
             if not dry_run:
                 save_mine_state(home, running=False, finished_at=now_iso(), error=str(exc))
             raise
+        if not dry_run and notify:
+            summary["email"] = mailer.notify_candidates(
+                home,
+                cfg,
+                [str(item.get("id") or "") for item in (summary.get("accepted") or [])],
+                "mining run",
+            )
         if not dry_run:
             agent_exit = summary.get("agent_exit")
             save_mine_state(
