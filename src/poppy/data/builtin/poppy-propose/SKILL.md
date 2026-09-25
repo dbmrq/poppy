@@ -16,9 +16,17 @@ queue as mined candidates — nothing becomes active until the user accepts it.
 ## What qualifies
 
 The bar is the miner's bar: **could a capable agent work this out in a few
-minutes on its own?** If yes, it is not worth keeping. It must have cost real
-work in this session — a failed attempt, a correction, an environment quirk, a
-non-obvious flag, a dead end before it clicked.
+minutes on its own?** If yes, it is not worth keeping. Skills and rules must
+have cost real work in this session — a failed attempt, a correction, an
+environment quirk, a non-obvious flag, a dead end before it clicked.
+
+**The exception is a memory the user stated**: a preference, constraint, path,
+service, account, or piece of environment or project knowledge they mentioned
+in passing qualifies even when nothing was hard — as long as the next agent
+could not have learned it without being told. Their own words are the
+evidence, and capturing these is how Poppy learns how the user's world is set
+up. Still not worth queueing: anything in the repo or its docs, anything
+detectable on the machine in seconds, or anything already in the library.
 
 - **memory** — a durable fact or preference (user, machine, project, or task)
   that is not derivable from the code, the docs, or common knowledge.

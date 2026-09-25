@@ -461,7 +461,11 @@ function candidateCard(candidate) {
   if (status === "writing") {
     actions.append(el("span", { class: "meta" }, [
       el("span", { class: "spin" }),
-      el("span", { text: `writer agent running…${elapsedSince(candidate.writing_started_at)}` }),
+      el("span", {
+        "data-clock": "writer agent running…",
+        "data-started": candidate.writing_started_at || "",
+        text: `writer agent running…${elapsedSince(candidate.writing_started_at)}`,
+      }),
     ]));
     children.push(actions);
     return el("article", { class: "card" }, children);
@@ -525,42 +529,63 @@ function userIsTyping() {
     && !!active.closest("#queue, #library");
 }
 
+function updateClocks() {
+  for (const node of document.querySelectorAll("[data-clock]")) {
+    node.textContent = `${node.dataset.clock || ""}${elapsedSince(node.dataset.started || "")}`;
+  }
+}
+
+let queueSignature = null;
+let librarySignature = null;
+
 function render(state) {
   $("#demo").hidden = !state.demo;
   renderSettings(state.config);
   renderMining(state.mining);
+  updateClocks();  // cheap text updates; they never disturb reading or typing
   if (userIsTyping()) return;  // never replace a card while its input has focus
-  const queue = $("#queue");
-  queue.replaceChildren();
-  const candidates = (state.candidates || []).slice().sort((a, b) => {
-    const aDecay = a.kind === "decay" ? 1 : 0;
-    const bDecay = b.kind === "decay" ? 1 : 0;
-    const order = aDecay - bDecay || STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
-    return order !== 0 ? order : String(b.created_at).localeCompare(String(a.created_at));
-  });
-  for (const candidate of candidates) queue.append(candidateCard(candidate));
-  $("#queue-empty").hidden = candidates.length > 0;
-  $("#queue-count").textContent = candidates.length ? `· ${candidates.length}` : "";
 
-  const libraryRoot = $("#library");
-  libraryRoot.replaceChildren();
-  let total = 0;
-  for (const [kind, label] of [["skill", "Skills"], ["memory", "Memories"], ["rule", "Rules"]]) {
-    const entries = (state.library || {})[kind] || [];
-    total += entries.length;
-    if (!entries.length) continue;
-    libraryRoot.append(el("h3", { class: "group", text: `${label} (${entries.length})` }));
-    for (const entry of entries) libraryRoot.append(entryRow(entry));
+  const scrollY = window.scrollY;
+  const queueKey = JSON.stringify(state.candidates || []);
+  if (queueKey !== queueSignature) {
+    queueSignature = queueKey;
+    const queue = $("#queue");
+    queue.replaceChildren();
+    const candidates = (state.candidates || []).slice().sort((a, b) => {
+      const aDecay = a.kind === "decay" ? 1 : 0;
+      const bDecay = b.kind === "decay" ? 1 : 0;
+      const order = aDecay - bDecay || STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
+      return order !== 0 ? order : String(b.created_at).localeCompare(String(a.created_at));
+    });
+    for (const candidate of candidates) queue.append(candidateCard(candidate));
+    $("#queue-empty").hidden = candidates.length > 0;
+    $("#queue-count").textContent = candidates.length ? `· ${candidates.length}` : "";
   }
-  if (!total) libraryRoot.append(el("p", { class: "empty", text: "The library is empty. Accepted candidates land here." }));
-  $("#library-count").textContent = total ? `· ${total}` : "";
 
-  const archived = state.archived || [];
-  $("#archived-section").hidden = archived.length === 0;
-  const archivedRoot = $("#archived");
-  archivedRoot.replaceChildren();
-  for (const entry of archived) archivedRoot.append(entryRow(entry, true));
-  $("#archived-count").textContent = archived.length ? `· ${archived.length}` : "";
+  const libraryKey = JSON.stringify([state.library || {}, (state.archived || []).length]);
+  if (libraryKey !== librarySignature) {
+    librarySignature = libraryKey;
+    const libraryRoot = $("#library");
+    libraryRoot.replaceChildren();
+    let total = 0;
+    for (const [kind, label] of [["skill", "Skills"], ["memory", "Memories"], ["rule", "Rules"]]) {
+      const entries = (state.library || {})[kind] || [];
+      total += entries.length;
+      if (!entries.length) continue;
+      libraryRoot.append(el("h3", { class: "group", text: `${label} (${entries.length})` }));
+      for (const entry of entries) libraryRoot.append(entryRow(entry));
+    }
+    if (!total) libraryRoot.append(el("p", { class: "empty", text: "The library is empty. Accepted candidates land here." }));
+    $("#library-count").textContent = total ? `· ${total}` : "";
+
+    const archived = state.archived || [];
+    $("#archived-section").hidden = archived.length === 0;
+    const archivedRoot = $("#archived");
+    archivedRoot.replaceChildren();
+    for (const entry of archived) archivedRoot.append(entryRow(entry, true));
+    $("#archived-count").textContent = archived.length ? `· ${archived.length}` : "";
+  }
+  window.scrollTo(0, scrollY);  // a rebuild must not move the reader
 
   const dirs = (state.skills_dirs || []).map((d) => typeof d === "string" ? d : d.path).join(", ");
   $("#path-home").textContent = state.home;

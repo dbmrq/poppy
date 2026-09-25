@@ -18,7 +18,7 @@ Start with searches, not reading. Good patterns: error messages, "always", "neve
 ## Kinds
 
 - **skill** — a reusable procedure: multi-step setup, a tricky flag sequence, a workaround, a validation or debugging routine. It must save real time next time.
-- **memory** — a durable fact about the user, this machine, or a project: preferences, environment details, decisions and the reasons behind them. Not a procedure.
+- **memory** — a durable fact about the user, this machine, or a project that the next agent could not have learned by itself: preferences, constraints, environment details (paths, services, hardware, accounts, how things are wired), decisions and the reasons behind them — whether the user *stated* them in passing or hard work revealed them. Not a procedure.
 - **rule** — a negative constraint that prevents a recurring mistake. Phrase it as "Never …", "Do not …", or "Always avoid …". Rules are for mistakes that keep happening, not one-off slips.
 
 For memories and rules, propose a `scope`:
@@ -35,7 +35,8 @@ When in doubt, prefer the narrower scope.
 The bar: **could a capable agent work this out in a few minutes on its own?** If yes, leave it out. Repo conventions visible in the code, documented library/framework behavior, standard tool usage, and anything the project's own docs state are all things the next agent can find by reading — keeping them only burns context and review time.
 
 - It must have **cost an agent real work to learn**: a failed attempt, a user correction, a non-obvious flag, an environment quirk, or a discovery that took several turns. If the answer arrived immediately and cleanly, that is not a discovery.
-- As a default: if the session does not show **at least about three turns of real work** (a wrong attempt, a correction, or a dead end before it clicked), do not propose it — no matter how true it is.
+- As a default: if the session does not show **at least about three turns of real work** (a wrong attempt, a correction, or a dead end before it clicked), do not propose it — no matter how true it is. **The exception is a memory the user stated** (next bullet).
+- **A fact the user told you needs no struggle.** Preferences, constraints, environment and project knowledge they mentioned in passing qualify as memories even when nothing was hard — the test is whether the next agent could have known it without being told (it is not in the repo, its docs, or detectable on the machine in seconds). Their own words are the evidence. This is how Poppy learns who the user is and how their world is set up — capture it whenever it surfaces.
 - Evidence: exact quotes from the sessions. Quotes are verified mechanically against the transcripts; a candidate whose quote cannot be found is discarded before any human sees it. Prefer a quote that shows the *cost* (the mistake, the correction, the dead end), not one that merely states the conclusion.
 - Prefer things that appear at least {{MIN_EVIDENCE}} time(s), or the single hard-won discovery described above. Say why in the summary.
 - A rule is only worth keeping if breaking it actually caused a problem you can quote.
